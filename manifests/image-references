@@ -1,0 +1,8 @@
+kind: ImageStream
+apiVersion: image.openshift.io/v1
+spec:
+  tags:
+  - name: cluster-machine-approver
+    from:
+      kind: DockerImage
+      name: docker.io/openshift/origin-cluster-machine-approver:v4.0

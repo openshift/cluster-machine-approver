@@ -1,0 +1,20 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:openshift:controller:machine-approver
+rules:
+- apiGroups:
+  - "certificates.k8s.io"
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+- apiGroups:
+  - "certificates.k8s.io"
+  resources:
+  - certificatesigningrequests/approval
+  verbs:
+  - update
