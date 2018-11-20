@@ -5,4 +5,4 @@ RUN cd /go/src/github.com/openshift/cluster-machine-appover && go build -o machi
 FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base
 COPY --from=builder /go/src/github.com/openshift/cluster-machine-appover/machine-approver /usr/bin/machine-approver
 COPY manifests /manifests
-LABEL io.openshift.release.operator=true
+LABEL io.openshift.release.operator true
