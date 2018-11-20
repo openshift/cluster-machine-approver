@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: openshift-cluster-machine-approver
+  name: machine-approver
+  labels:
+    app: openshift-machine-approver
+    machine-approver: "true"
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: openshift-machine-approver
+  template:
+    metadata:
+      name: machine-approver
+      labels:
+        app: openshift-machine-approver
+    spec:
+      serviceAccountName: machine-approver-sa
+      containers:
+      - name: machine-approver-controller
+        image: docker.io/openshift/origin-cluster-machine-approver:v4.0
+        imagePullPolicy: Always
+        command: ["/usr/bin/machine-approver", "--logtostderr", "-v", "3"]
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      tolerations:
+      - operator: Exists

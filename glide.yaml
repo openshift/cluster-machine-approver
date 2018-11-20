@@ -1,0 +1,21 @@
+package: github.com/openshift/cluster-machine-approver
+import:
+- package: k8s.io/api
+  version: kubernetes-1.11.1
+  subpackages:
+  - certificates/v1beta1
+  - core/v1
+- package: k8s.io/apimachinery
+  version: kubernetes-1.11.1
+  subpackages:
+  - pkg/fields
+  - pkg/util/runtime
+  - pkg/util/wait
+- package: k8s.io/client-go
+  version: kubernetes-1.11.1
+  subpackages:
+  - kubernetes
+  - tools/cache
+  - tools/clientcmd
+  - util/workqueue
+- package: github.com/golang/glog
