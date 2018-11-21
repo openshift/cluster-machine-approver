@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: openshift-cluster-machine-approver
   labels:
-    openshift.io/run-level: "1"
+    openshift.io/run-level: "0"
