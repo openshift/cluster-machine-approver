@@ -18,12 +18,18 @@ spec:
       labels:
         app: openshift-machine-approver
     spec:
+      hostNetwork: true
       serviceAccountName: machine-approver-sa
       containers:
       - name: machine-approver-controller
         image: docker.io/openshift/origin-cluster-machine-approver:v4.0
         imagePullPolicy: Always
         command: ["/usr/bin/machine-approver", "--logtostderr", "-v", "3"]
+        env:
+        - name: KUBERNETES_SERVICE_PORT
+          value: "6443"
+        - name: KUBERNETES_SERVICE_HOST
+          value: "127.0.0.1"
       nodeSelector:
         node-role.kubernetes.io/master: ""
       tolerations:
