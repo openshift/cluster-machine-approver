@@ -24,12 +24,24 @@ spec:
       - name: machine-approver-controller
         image: docker.io/openshift/origin-cluster-machine-approver:v4.0
         imagePullPolicy: Always
-        command: ["/usr/bin/machine-approver", "--logtostderr", "-v", "3"]
+        command: ["machine-approver", "operator"]
+        args:
+        - "--config=/var/run/configmaps/config/operator-config.yaml"
+        - "-v=4"
         env:
+        # fix these
         - name: KUBERNETES_SERVICE_PORT
           value: "6443"
         - name: KUBERNETES_SERVICE_HOST
           value: "127.0.0.1"
+        volumeMounts:
+        - mountPath: /var/run/configmaps/config
+          name: config
+      volumes:
+      - name: config
+        configMap:
+          defaultMode: 440
+          name: origin-cluster-machine-approver-config
       nodeSelector:
         node-role.kubernetes.io/master: ""
       tolerations:
