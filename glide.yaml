@@ -1,24 +1,21 @@
 package: github.com/openshift/cluster-machine-approver
 import:
-- package: k8s.io/apimachinery
-  version: kubernetes-1.11.1
 - package: k8s.io/api
   version: kubernetes-1.11.1
-- package: k8s.io/apiserver
+  subpackages:
+  - certificates/v1beta1
+  - core/v1
+- package: k8s.io/apimachinery
   version: kubernetes-1.11.1
+  subpackages:
+  - pkg/fields
+  - pkg/util/runtime
+  - pkg/util/wait
 - package: k8s.io/client-go
   version: kubernetes-1.11.1
-- package: k8s.io/kube-aggregator
-  version: kubernetes-1.11.1
-- package: k8s.io/apiextensions-apiserver
-  version: kubernetes-1.11.1
-- package: github.com/openshift/api
-  version: master
-- package: github.com/openshift/client-go
-  version: master
-- package: github.com/openshift/library-go
-  version: master
-
-#for bindata
-- package: github.com/jteeuwen/go-bindata
-  version: a0ff2567cfb70903282db057e799fd826784d41d
+  subpackages:
+  - kubernetes
+  - tools/cache
+  - tools/clientcmd
+  - util/workqueue
+- package: github.com/golang/glog
