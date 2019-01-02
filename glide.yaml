@@ -19,3 +19,7 @@ import:
   - tools/clientcmd
   - util/workqueue
 - package: github.com/golang/glog
+- package: github.com/openshift/cluster-api
+  version: release-4.0
+- package: sigs.k8s.io/controller-runtime
+  version: "v0.1.1"
