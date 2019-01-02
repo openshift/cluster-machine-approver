@@ -18,3 +18,12 @@ rules:
   - certificatesigningrequests/approval
   verbs:
   - update
+- apiGroups:
+  - "machine.openshift.io"
+  resources:
+  - machines
+  verbs:
+  - get
+  - list
+  - watch
+  - update
