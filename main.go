@@ -23,31 +23,40 @@ import (
 
 	"github.com/golang/glog"
 
+	//"sigs.k8s.io/controller-runtime/pkg/client/config"
+
+	csrclient "k8s.io/client-go/util/certificate/csr"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/util/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
+
+	mapiclient "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset"
 )
 
+const machineAPINamespace = "openshift-machine-api"
+
 type Controller struct {
-	clientset *kubernetes.Clientset
-	indexer   cache.Indexer
-	queue     workqueue.RateLimitingInterface
-	informer  cache.Controller
+	clientset     *kubernetes.Clientset
+	machineClient *mapiclient.Clientset
+	indexer       cache.Indexer
+	queue         workqueue.RateLimitingInterface
+	informer      cache.Controller
 }
 
-func NewController(clientset *kubernetes.Clientset, queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller) *Controller {
+func NewController(clientset *kubernetes.Clientset, machineClientset *mapiclient.Clientset, queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller) *Controller {
 	return &Controller{
-		clientset: clientset,
-		informer:  informer,
-		indexer:   indexer,
-		queue:     queue,
+		clientset:     clientset,
+		machineClient: machineClientset,
+		informer:      informer,
+		indexer:       indexer,
+		queue:         queue,
 	}
 }
 
@@ -99,12 +108,36 @@ func (c *Controller) handleNewCSR(key string) error {
 		return nil
 	}
 
-	// TODO and CSR checking logic here
+	parsedCSR, err := csrclient.ParseCSR(csr)
+	if err != nil {
+		glog.Infof("error parsing request CSR: %v", err)
+		return nil
+	}
+
+	approvalMsg := "This CSR was approved by the Node CSR Approver"
+	machineList, err := c.machineClient.MachineV1beta1().Machines(machineAPINamespace).List(metav1.ListOptions{})
+	if err == nil {
+		if !authorizeCSR(machineList, csr, parsedCSR) {
+			// Don't deny since it might be someone else's CSR
+			glog.Infof("CSR %s not authorized", csr.GetName())
+			return nil
+		}
+	}
+	if err != nil {
+		glog.Infof("machine api not available: %v", err)
+		// Validate the CSR for the bootstrapping phase without a SAN check.
+		_, ok := validateCSRContents(csr, parsedCSR)
+		if !ok {
+			glog.Infof("CSR %s not valid", csr.GetName())
+			return nil
+		}
+		approvalMsg += " (no SAN validation)"
+	}
 
 	csr.Status.Conditions = append(csr.Status.Conditions, certificatesv1beta1.CertificateSigningRequestCondition{
 		Type:           certificatesv1beta1.CertificateApproved,
 		Reason:         "NodeCSRApprove",
-		Message:        "This CSR was approved by the Node CSR Approver.",
+		Message:        approvalMsg,
 		LastUpdateTime: metav1.Now(),
 	})
 
@@ -139,12 +172,12 @@ func (c *Controller) handleErr(err error, key interface{}) {
 
 	c.queue.Forget(key)
 	// Report to an external entity that, even after several retries, we could not successfully process this key
-	runtime.HandleError(err)
+	utilruntime.HandleError(err)
 	glog.Infof("Dropping CSR %q out of the queue: %v", key, err)
 }
 
 func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
-	defer runtime.HandleCrash()
+	defer utilruntime.HandleCrash()
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
@@ -154,7 +187,7 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 
 	// Wait for all involved caches to be synced, before processing items from the queue is started
 	if !cache.WaitForCacheSync(stopCh, c.informer.HasSynced) {
-		runtime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
+		utilruntime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
 		return
 	}
 
@@ -185,13 +218,18 @@ func main() {
 	}
 
 	// creates the clientset
-	clientset, err := kubernetes.NewForConfig(config)
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		glog.Fatal(err)
+	}
+
+	machineClient, err := mapiclient.NewForConfig(config)
 	if err != nil {
 		glog.Fatal(err)
 	}
 
 	// create the csr watcher
-	csrListWatcher := cache.NewListWatchFromClient(clientset.CertificatesV1beta1().RESTClient(), "certificatesigningrequests", v1.NamespaceAll, fields.Everything())
+	csrListWatcher := cache.NewListWatchFromClient(client.CertificatesV1beta1().RESTClient(), "certificatesigningrequests", v1.NamespaceAll, fields.Everything())
 
 	// create the workqueue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
@@ -209,7 +247,7 @@ func main() {
 		},
 	}, cache.Indexers{})
 
-	controller := NewController(clientset, queue, indexer, informer)
+	controller := NewController(client, machineClient, queue, indexer, informer)
 
 	// Now let's start the controller
 	stop := make(chan struct{})
