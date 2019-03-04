@@ -23,7 +23,7 @@ spec:
       containers:
       - name: machine-approver-controller
         image: docker.io/openshift/origin-cluster-machine-approver:v4.0
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         command: ["/usr/bin/machine-approver", "--logtostderr", "-v", "3"]
         env:
         - name: KUBERNETES_SERVICE_PORT
