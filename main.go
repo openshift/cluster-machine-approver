@@ -117,18 +117,19 @@ func (c *Controller) handleNewCSR(key string) error {
 	approvalMsg := "This CSR was approved by the Node CSR Approver"
 	machineList, err := c.machineClient.MachineV1beta1().Machines(machineAPINamespace).List(metav1.ListOptions{})
 	if err == nil {
-		if !authorizeCSR(machineList, csr, parsedCSR) {
+		err := authorizeCSR(machineList, csr, parsedCSR)
+		if err != nil {
 			// Don't deny since it might be someone else's CSR
-			glog.Infof("CSR %s not authorized", csr.GetName())
+			glog.Infof("CSR %s not authorized: %v", csr.GetName(), err)
 			return nil
 		}
 	}
 	if err != nil {
 		glog.Infof("machine api not available: %v", err)
 		// Validate the CSR for the bootstrapping phase without a SAN check.
-		_, ok := validateCSRContents(csr, parsedCSR)
-		if !ok {
-			glog.Infof("CSR %s not valid", csr.GetName())
+		_, err := validateCSRContents(csr, parsedCSR)
+		if err != nil {
+			glog.Infof("CSR %s not valid: %v", csr.GetName(), err)
 			return nil
 		}
 		approvalMsg += " (no SAN validation)"
