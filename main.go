@@ -91,7 +91,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		return nil
 	}
 
-	csr := obj.(*certificatesv1beta1.CertificateSigningRequest)
+	csr := obj.(*certificatesv1beta1.CertificateSigningRequest).DeepCopy()
 	// Note that you also have to check the uid if you have a local controlled resource, which
 	// is dependent on the actual instance, to detect that a CSR was recreated with the same name
 	glog.Infof("CSR %s added\n", csr.GetName())
