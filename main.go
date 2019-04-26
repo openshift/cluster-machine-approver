@@ -121,7 +121,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		if err != nil {
 			// Don't deny since it might be someone else's CSR
 			glog.Infof("CSR %s not authorized: %v", csr.GetName(), err)
-			return nil
+			return err
 		}
 	}
 	if err != nil {
@@ -130,7 +130,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		_, err := validateCSRContents(csr, parsedCSR)
 		if err != nil {
 			glog.Infof("CSR %s not valid: %v", csr.GetName(), err)
-			return nil
+			return err
 		}
 		approvalMsg += " (no SAN validation)"
 	}
