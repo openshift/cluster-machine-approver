@@ -25,7 +25,6 @@ import (
 
 	//"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	csrclient "k8s.io/client-go/util/certificate/csr"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +34,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	csrclient "k8s.io/client-go/util/certificate/csr"
 	"k8s.io/client-go/util/workqueue"
 
 	mapiclient "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset"
@@ -121,7 +121,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		if err != nil {
 			// Don't deny since it might be someone else's CSR
 			glog.Infof("CSR %s not authorized: %v", csr.GetName(), err)
-			return nil
+			return err
 		}
 	}
 	if err != nil {
@@ -130,7 +130,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		_, err := validateCSRContents(csr, parsedCSR)
 		if err != nil {
 			glog.Infof("CSR %s not valid: %v", csr.GetName(), err)
-			return nil
+			return err
 		}
 		approvalMsg += " (no SAN validation)"
 	}
