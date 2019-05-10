@@ -23,40 +23,49 @@ import (
 
 	"github.com/golang/glog"
 
-	//"sigs.k8s.io/controller-runtime/pkg/client/config"
-
-	csrclient "k8s.io/client-go/util/certificate/csr"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	certificatesv1beta1client "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	csrclient "k8s.io/client-go/util/certificate/csr"
 	"k8s.io/client-go/util/workqueue"
 
 	mapiclient "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset"
+	machinev1beta1client "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset/typed/machine/v1beta1"
 )
 
 const machineAPINamespace = "openshift-machine-api"
 
 type Controller struct {
-	clientset     *kubernetes.Clientset
-	machineClient *mapiclient.Clientset
-	indexer       cache.Indexer
-	queue         workqueue.RateLimitingInterface
-	informer      cache.Controller
+	config ClusterMachineApproverConfig
+
+	csrs     certificatesv1beta1client.CertificateSigningRequestInterface
+	nodes    corev1client.NodeInterface
+	machines machinev1beta1client.MachineInterface
+
+	indexer  cache.Indexer
+	queue    workqueue.RateLimitingInterface
+	informer cache.Controller
 }
 
-func NewController(clientset *kubernetes.Clientset, machineClientset *mapiclient.Clientset, queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller) *Controller {
+func NewController(config ClusterMachineApproverConfig, clientset *kubernetes.Clientset, machineClientset *mapiclient.Clientset, queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller) *Controller {
 	return &Controller{
-		clientset:     clientset,
-		machineClient: machineClientset,
-		informer:      informer,
-		indexer:       indexer,
-		queue:         queue,
+		config: config,
+
+		csrs:     clientset.CertificatesV1beta1().CertificateSigningRequests(),
+		nodes:    clientset.CoreV1().Nodes(),
+		machines: machineClientset.MachineV1beta1().Machines(machineAPINamespace),
+
+		indexer:  indexer,
+		queue:    queue,
+		informer: informer,
 	}
 }
 
@@ -87,24 +96,23 @@ func (c *Controller) handleNewCSR(key string) error {
 
 	if !exists {
 		// Below we will warm up our cache with a CSR, so that we will see a delete for one csr
-		glog.Infof("CSR %s does not exist anymore\n", key)
+		glog.Infof("CSR %s does not exist anymore", key)
 		return nil
 	}
 
+	// do not mutate informer cache
 	csr := obj.(*certificatesv1beta1.CertificateSigningRequest).DeepCopy()
 	// Note that you also have to check the uid if you have a local controlled resource, which
 	// is dependent on the actual instance, to detect that a CSR was recreated with the same name
-	glog.Infof("CSR %s added\n", csr.GetName())
+	glog.Infof("CSR %s added", csr.Name)
 
-	var alreadyApproved bool
-	for _, c := range csr.Status.Conditions {
-		if c.Type == certificatesv1beta1.CertificateApproved {
-			alreadyApproved = true
-			break
-		}
+	if isApproved(csr) {
+		glog.Infof("CSR %s is already approved", csr.Name)
+		return nil
 	}
-	if alreadyApproved {
-		glog.Infof("CSR %s is already approved\n", csr.GetName())
+
+	if pending := recentlyPendingCSRs(c.indexer); pending > maxPendingCSRs {
+		glog.Infof("ignoring all CSRs as too many recent pending CSRs seen: %d", pending)
 		return nil
 	}
 
@@ -114,39 +122,29 @@ func (c *Controller) handleNewCSR(key string) error {
 		return nil
 	}
 
-	approvalMsg := "This CSR was approved by the Node CSR Approver"
-	machineList, err := c.machineClient.MachineV1beta1().Machines(machineAPINamespace).List(metav1.ListOptions{})
-	if err == nil {
-		err := authorizeCSR(machineList, csr, parsedCSR)
-		if err != nil {
-			// Don't deny since it might be someone else's CSR
-			glog.Infof("CSR %s not authorized: %v", csr.GetName(), err)
-			return err
-		}
-	}
+	machines, err := c.machines.List(metav1.ListOptions{})
 	if err != nil {
-		glog.Infof("machine api not available: %v", err)
-		// Validate the CSR for the bootstrapping phase without a SAN check.
-		_, err := validateCSRContents(csr, parsedCSR)
-		if err != nil {
-			glog.Infof("CSR %s not valid: %v", csr.GetName(), err)
-			return err
-		}
-		approvalMsg += " (no SAN validation)"
+		return fmt.Errorf("failed to list machines: %v", err)
+	}
+
+	if err := authorizeCSR(c.config, machines.Items, c.nodes, csr, parsedCSR); err != nil {
+		// Don't deny since it might be someone else's CSR
+		glog.Infof("CSR %s not authorized: %v", csr.Name, err)
+		return err
 	}
 
 	csr.Status.Conditions = append(csr.Status.Conditions, certificatesv1beta1.CertificateSigningRequestCondition{
 		Type:           certificatesv1beta1.CertificateApproved,
 		Reason:         "NodeCSRApprove",
-		Message:        approvalMsg,
+		Message:        "This CSR was approved by the Node CSR Approver",
 		LastUpdateTime: metav1.Now(),
 	})
 
-	if _, err := c.clientset.CertificatesV1beta1().CertificateSigningRequests().UpdateApproval(csr); err != nil {
+	if _, err := c.csrs.UpdateApproval(csr); err != nil {
 		return err
 	}
 
-	glog.Infof("CSR %s approved\n", csr.GetName())
+	glog.Infof("CSR %s approved", csr.Name)
 
 	return nil
 }
@@ -205,11 +203,15 @@ func (c *Controller) runWorker() {
 }
 
 func main() {
-	var kubeconfig string
-	var master string
+	var (
+		kubeconfig string
+		master     string
+		cliConfig  string
+	)
 
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
+	flag.StringVar(&cliConfig, "config", "", "CLI config")
 	flag.Parse()
 
 	// creates the connection
@@ -248,7 +250,7 @@ func main() {
 		},
 	}, cache.Indexers{})
 
-	controller := NewController(client, machineClient, queue, indexer, informer)
+	controller := NewController(loadConfig(cliConfig), client, machineClient, queue, indexer, informer)
 
 	// Now let's start the controller
 	stop := make(chan struct{})
