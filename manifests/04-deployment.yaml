@@ -4,19 +4,19 @@ metadata:
   namespace: openshift-cluster-machine-approver
   name: machine-approver
   labels:
-    app: openshift-machine-approver
+    app: machine-approver
     machine-approver: "true"
 spec:
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: openshift-machine-approver
+      app: machine-approver
   template:
     metadata:
       name: machine-approver
       labels:
-        app: openshift-machine-approver
+        app: machine-approver
     spec:
       hostNetwork: true
       serviceAccountName: machine-approver-sa
@@ -24,12 +24,30 @@ spec:
       - name: machine-approver-controller
         image: docker.io/openshift/origin-cluster-machine-approver:v4.0
         imagePullPolicy: IfNotPresent
-        command: ["/usr/bin/machine-approver", "--logtostderr", "-v", "3"]
+        command: ["/usr/bin/machine-approver"]
+        args:
+        - "--config=/var/run/configmaps/config/config.yaml"
+        - "-v=2"
+        - "--logtostderr"
+        resources:
+          requests:
+            memory: 50Mi
+            cpu: 10m
+        volumeMounts:
+        - mountPath: /var/run/configmaps/config
+          name: config
         env:
         - name: KUBERNETES_SERVICE_PORT
           value: "6443"
         - name: KUBERNETES_SERVICE_HOST
           value: "127.0.0.1"
+        terminationMessagePolicy: FallbackToLogsOnError
+      volumes:
+      - name: config
+        configMap:
+          defaultMode: 440
+          name: machine-approver-config
+          optional: true
       nodeSelector:
         node-role.kubernetes.io/master: ""
       priorityClassName: "system-cluster-critical"
