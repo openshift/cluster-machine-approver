@@ -17,11 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"time"
-
-	"github.com/golang/glog"
 
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	v1 "k8s.io/api/core/v1"
@@ -34,8 +34,8 @@ import (
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	csrclient "k8s.io/client-go/util/certificate/csr"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog"
 
 	mapiclient "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset"
 	machinev1beta1client "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset/typed/machine/v1beta1"
@@ -90,13 +90,13 @@ func (c *Controller) processNextItem() bool {
 func (c *Controller) handleNewCSR(key string) error {
 	obj, exists, err := c.indexer.GetByKey(key)
 	if err != nil {
-		glog.Errorf("Fetching object with key %s from store failed with %v", key, err)
+		klog.Errorf("Fetching object with key %s from store failed with %v", key, err)
 		return err
 	}
 
 	if !exists {
 		// Below we will warm up our cache with a CSR, so that we will see a delete for one csr
-		glog.Infof("CSR %s does not exist anymore", key)
+		klog.Infof("CSR %s does not exist anymore", key)
 		return nil
 	}
 
@@ -104,21 +104,21 @@ func (c *Controller) handleNewCSR(key string) error {
 	csr := obj.(*certificatesv1beta1.CertificateSigningRequest).DeepCopy()
 	// Note that you also have to check the uid if you have a local controlled resource, which
 	// is dependent on the actual instance, to detect that a CSR was recreated with the same name
-	glog.Infof("CSR %s added", csr.Name)
+	klog.Infof("CSR %s added", csr.Name)
 
 	if isApproved(csr) {
-		glog.Infof("CSR %s is already approved", csr.Name)
+		klog.Infof("CSR %s is already approved", csr.Name)
 		return nil
 	}
 
 	if pending := recentlyPendingCSRs(c.indexer); pending > maxPendingCSRs {
-		glog.Infof("ignoring all CSRs as too many recent pending CSRs seen: %d", pending)
+		klog.Infof("ignoring all CSRs as too many recent pending CSRs seen: %d", pending)
 		return nil
 	}
 
-	parsedCSR, err := csrclient.ParseCSR(csr)
+	parsedCSR, err := parseCSR(csr)
 	if err != nil {
-		glog.Infof("error parsing request CSR: %v", err)
+		klog.Infof("error parsing request CSR: %v", err)
 		return nil
 	}
 
@@ -129,7 +129,7 @@ func (c *Controller) handleNewCSR(key string) error {
 
 	if err := authorizeCSR(c.config, machines.Items, c.nodes, csr, parsedCSR); err != nil {
 		// Don't deny since it might be someone else's CSR
-		glog.Infof("CSR %s not authorized: %v", csr.Name, err)
+		klog.Infof("CSR %s not authorized: %v", csr.Name, err)
 		return err
 	}
 
@@ -144,7 +144,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		return err
 	}
 
-	glog.Infof("CSR %s approved", csr.Name)
+	klog.Infof("CSR %s approved", csr.Name)
 
 	return nil
 }
@@ -161,7 +161,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 
 	// This controller retries 5 times if something goes wrong. After that, it stops trying.
 	if c.queue.NumRequeues(key) < 5 {
-		glog.Infof("Error syncing csr %v: %v", key, err)
+		klog.Infof("Error syncing csr %v: %v", key, err)
 
 		// Re-enqueue the key rate limited. Based on the rate limiter on the
 		// queue and the re-enqueue history, the key will be processed later again.
@@ -172,7 +172,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 	c.queue.Forget(key)
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	utilruntime.HandleError(err)
-	glog.Infof("Dropping CSR %q out of the queue: %v", key, err)
+	klog.Infof("Dropping CSR %q out of the queue: %v", key, err)
 }
 
 func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
@@ -180,7 +180,7 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
-	glog.Info("Starting Machine Approver")
+	klog.Info("Starting Machine Approver")
 
 	go c.informer.Run(stopCh)
 
@@ -217,18 +217,18 @@ func main() {
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
-		glog.Fatal(err)
+		klog.Fatal(err)
 	}
 
 	// creates the clientset
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		glog.Fatal(err)
+		klog.Fatal(err)
 	}
 
 	machineClient, err := mapiclient.NewForConfig(config)
 	if err != nil {
-		glog.Fatal(err)
+		klog.Fatal(err)
 	}
 
 	// create the csr watcher
@@ -259,4 +259,14 @@ func main() {
 
 	// Wait forever
 	select {}
+}
+
+// parseCSR extracts the CSR from the API object and decodes it.
+func parseCSR(obj *certificatesv1beta1.CertificateSigningRequest) (*x509.CertificateRequest, error) {
+	// extract PEM from request object
+	block, _ := pem.Decode(obj.Spec.Request)
+	if block == nil || block.Type != "CERTIFICATE REQUEST" {
+		return nil, fmt.Errorf("PEM block type must be CERTIFICATE REQUEST")
+	}
+	return x509.ParseCertificateRequest(block.Bytes)
 }

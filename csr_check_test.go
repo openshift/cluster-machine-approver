@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/util/certificate/csr"
 
 	machinev1beta1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 )
@@ -1963,7 +1962,7 @@ func Test_authorizeCSR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.args.req.Spec.Request = []byte(tt.args.csr)
-			parsedCSR, err := csr.ParseCSR(tt.args.req)
+			parsedCSR, err := parseCSR(tt.args.req)
 			if err != nil {
 				t.Fatal(err)
 			}
