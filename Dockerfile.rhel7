@@ -10,7 +10,7 @@ ENTRYPOINT ["/usr/bin/machine-approver"]
 LABEL io.k8s.display-name="OpenShift cluster-machine-approver" \
       io.k8s.description="This is an OpenShift component for approving new machines" \
       com.redhat.component="cluster-machine-approver" \
-      maintainer="OpenShift Auth Team <aos-auth-team@redhat.com>" \
+      maintainer="OpenShift API/Auth/Scheduling Team <aos-master@redhat.com>" \
       name="openshift/ose-cluster-machine-approver" \
       version="v4.0.0" \
       io.openshift.tags="openshift" \
