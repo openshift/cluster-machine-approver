@@ -209,6 +209,7 @@ func main() {
 		cliConfig  string
 	)
 
+	klog.InitFlags(nil)
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
 	flag.StringVar(&cliConfig, "config", "", "CLI config")
