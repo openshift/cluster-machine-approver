@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/x509"
 	"fmt"
+	"k8s.io/klog"
 	"strings"
 	"time"
 
@@ -22,8 +23,8 @@ const (
 	nodeGroup      = "system:nodes"
 	nodeUserPrefix = nodeUser + ":"
 
-	maxPendingDelta = time.Hour
-	maxPendingCSRs  = 100
+	maxDeniedDelta = time.Hour
+	maxDeniedCSRs  = 100
 
 	nodeBootstrapperUsername = "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper"
 
@@ -273,13 +274,22 @@ func isApproved(csr *certificatesv1beta1.CertificateSigningRequest) bool {
 	return false
 }
 
-func recentlyPendingCSRs(indexer cache.Indexer) int {
+func isDenied(csr *certificatesv1beta1.CertificateSigningRequest) bool {
+	for _, condition := range csr.Status.Conditions {
+		if condition.Type == certificatesv1beta1.CertificateDenied {
+			return true
+		}
+	}
+	return false
+}
+
+func recentlyDeniedCSRs(indexer cache.Indexer) int {
 	// assumes we are scheduled on the master meaning our clock is the same
 	now := time.Now()
-	start := now.Add(-maxPendingDelta)
+	start := now.Add(-maxDeniedDelta)
 	end := now.Add(maxMachineClockSkew)
 
-	var pending int
+	var denied int
 
 	for _, item := range indexer.List() {
 		csr := item.(*certificatesv1beta1.CertificateSigningRequest)
@@ -289,10 +299,20 @@ func recentlyPendingCSRs(indexer cache.Indexer) int {
 			continue
 		}
 
-		if !isApproved(csr) {
-			pending++
+		if isDenied(csr) {
+			denied++
 		}
 	}
 
-	return pending
+	return denied
+}
+
+func isNodeBootstrapCSR(csr *certificatesv1beta1.CertificateSigningRequest) bool {
+	parsedCSR, err := parseCSR(csr)
+	if err != nil {
+		klog.Errorf("Failed to parse CSR: %v", err)
+		return false
+	}
+	nodeAsking, _:= validateCSRContents(csr, parsedCSR)
+	return isNodeClientCert(csr, parsedCSR) || nodeAsking != ""
 }

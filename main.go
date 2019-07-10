@@ -106,19 +106,24 @@ func (c *Controller) handleNewCSR(key string) error {
 	// is dependent on the actual instance, to detect that a CSR was recreated with the same name
 	klog.Infof("CSR %s added", csr.Name)
 
+	parsedCSR, err := parseCSR(csr)
+	if err != nil {
+		klog.Infof("error parsing request CSR: %v", err)
+		return nil
+	}
+
+	if !isNodeBootstrapCSR(csr) {
+		klog.Infof("CSR %s is not a node bootstrap CSR, skipping", csr.Name)
+		return nil
+	}
+
 	if isApproved(csr) {
 		klog.Infof("CSR %s is already approved", csr.Name)
 		return nil
 	}
 
-	if pending := recentlyPendingCSRs(c.indexer); pending > maxPendingCSRs {
-		klog.Infof("ignoring all CSRs as too many recent pending CSRs seen: %d", pending)
-		return nil
-	}
-
-	parsedCSR, err := parseCSR(csr)
-	if err != nil {
-		klog.Infof("error parsing request CSR: %v", err)
+	if denied := recentlyDeniedCSRs(c.indexer); denied > maxDeniedCSRs {
+		klog.Infof("ignoring all CSRs as too many recent denied CSRs seen: %d", denied)
 		return nil
 	}
 
@@ -128,11 +133,13 @@ func (c *Controller) handleNewCSR(key string) error {
 	}
 
 	if err := authorizeCSR(c.config, machines.Items, c.nodes, csr, parsedCSR); err != nil {
-		// Don't deny since it might be someone else's CSR
-		klog.Infof("CSR %s not authorized: %v", csr.Name, err)
-		return err
+		return c.denyCSR(csr)
 	}
 
+	return c.approveCSR(csr)
+}
+
+func (c *Controller) approveCSR(csr *certificatesv1beta1.CertificateSigningRequest) error {
 	csr.Status.Conditions = append(csr.Status.Conditions, certificatesv1beta1.CertificateSigningRequestCondition{
 		Type:           certificatesv1beta1.CertificateApproved,
 		Reason:         "NodeCSRApprove",
@@ -143,9 +150,22 @@ func (c *Controller) handleNewCSR(key string) error {
 	if _, err := c.csrs.UpdateApproval(csr); err != nil {
 		return err
 	}
-
 	klog.Infof("CSR %s approved", csr.Name)
+	return nil
+}
 
+func (c *Controller) denyCSR(csr *certificatesv1beta1.CertificateSigningRequest) error {
+	csr.Status.Conditions = append(csr.Status.Conditions, certificatesv1beta1.CertificateSigningRequestCondition{
+		Type:           certificatesv1beta1.CertificateDenied,
+		Reason:         "NodeCSRDeny",
+		Message:        "This CSR was denied by the Node CSR Approver",
+		LastUpdateTime: metav1.Now(),
+	})
+
+	if _, err := c.csrs.UpdateApproval(csr); err != nil {
+		return err
+	}
+	klog.Infof("CSR %s denied", csr.Name)
 	return nil
 }
 

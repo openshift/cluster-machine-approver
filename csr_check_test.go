@@ -2006,3 +2006,72 @@ func (n *testNode) Get(name string, _ metav1.GetOptions) (*corev1.Node, error) {
 
 	return nil, n.err
 }
+
+func TestIsNodeBootstrapCSR(t *testing.T) {
+	testCases := []struct{
+		csr      *certificatesv1beta1.CertificateSigningRequest
+		expected bool
+	}{
+		{
+			csr: &certificatesv1beta1.CertificateSigningRequest{
+				Spec: certificatesv1beta1.CertificateSigningRequestSpec{
+					Usages: []certificatesv1beta1.KeyUsage{
+						certificatesv1beta1.UsageDigitalSignature,
+						certificatesv1beta1.UsageKeyEncipherment,
+						certificatesv1beta1.UsageServerAuth,
+					},
+					Username: "system:node:test",
+					Groups: []string{
+						"system:authenticated",
+						"system:nodes",
+					},
+					Request: []byte(goodCSR),
+				},
+			},
+			expected: true,
+		},
+		{
+			csr: &certificatesv1beta1.CertificateSigningRequest{
+				Spec: certificatesv1beta1.CertificateSigningRequestSpec{
+					Usages: []certificatesv1beta1.KeyUsage{
+						certificatesv1beta1.UsageKeyEncipherment,
+						certificatesv1beta1.UsageDigitalSignature,
+						certificatesv1beta1.UsageClientAuth,
+					},
+					Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+					Groups: []string{
+						"system:authenticated",
+						"system:serviceaccounts:openshift-machine-config-operator",
+						"system:serviceaccounts",
+					},
+					Request: []byte(clientGood),
+				},
+			},
+			expected: true,
+		},
+		{
+			csr: &certificatesv1beta1.CertificateSigningRequest{
+				Spec: certificatesv1beta1.CertificateSigningRequestSpec{
+					Usages: []certificatesv1beta1.KeyUsage{
+						certificatesv1beta1.UsageKeyEncipherment,
+						certificatesv1beta1.UsageDigitalSignature,
+						certificatesv1beta1.UsageClientAuth,
+					},
+					Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+					Groups: []string{
+						"system:authenticated",
+						"system:serviceaccounts:openshift-machine-config-operator",
+						"system:serviceaccounts",
+					},
+					Request: []byte(clientWrongCN),
+				},
+			},
+			expected: false,
+		},
+	}
+	for _, tc := range testCases {
+		if got:= isNodeBootstrapCSR(tc.csr); got != tc.expected {
+			t.Errorf("expected: %v, got: %v", tc.expected, got)
+		}
+	}
+}
