@@ -111,8 +111,41 @@ func (c *Controller) handleNewCSR(key string) error {
 		return nil
 	}
 
-	if pending := recentlyPendingCSRs(c.indexer); pending > maxPendingCSRs {
-		klog.Infof("ignoring all CSRs as too many recent pending CSRs seen: %d", pending)
+	machines, err := c.machines.List(metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list machines: %v", err)
+	}
+
+	pendingMachinesCount := 0
+	for _, machine := range machines.Items {
+		if machine.Status.NodeRef == nil {
+			pendingMachinesCount++
+		}
+	}
+
+	// Since server-side certs are issued after client side is approved, we
+	// need to get a count of 'approved' csrs as well; approved csrs are
+	// cleaned up automatically after approval.
+	csrsList, err := c.csrs.List(metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list all csrs: %v", err)
+	}
+	approvedCount := 0
+	for _, csreq := range csrsList.Items {
+		if isApproved(&csreq) {
+			approvedCount++
+		}
+	}
+	maxPendingTotal := maxPendingCSRs + pendingMachinesCount + approvedCount
+	// If for some reason we see a really high approved count, just set
+	// absolute max to total machines + maxPendingCSRs
+	if approvedCount > len(machines.Items) {
+		maxPendingTotal = len(machines.Items) + maxPendingCSRs
+	}
+
+	if pending := recentlyPendingCSRs(c.indexer); pending > maxPendingTotal {
+		klog.Error("Difference between pending CSRs and machines > 100", pending)
+		klog.Errorf("Pending CSRs: %d; Pending Machines %d", pending, pendingMachinesCount)
 		return nil
 	}
 
@@ -120,11 +153,6 @@ func (c *Controller) handleNewCSR(key string) error {
 	if err != nil {
 		klog.Infof("error parsing request CSR: %v", err)
 		return nil
-	}
-
-	machines, err := c.machines.List(metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list machines: %v", err)
 	}
 
 	if err := authorizeCSR(c.config, machines.Items, c.nodes, csr, parsedCSR); err != nil {
