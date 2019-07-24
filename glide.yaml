@@ -20,3 +20,7 @@ import:
   - util/workqueue
 - package: github.com/openshift/cluster-api
   version: master
+- package: github.com/prometheus/client_golang
+  version: v0.9.4
+  subpackages:
+  - prometheus        
