@@ -21,8 +21,13 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"net/http"
+	"os"
+	"strconv"
+	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,7 +47,11 @@ import (
 	machinev1beta1client "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset/typed/machine/v1beta1"
 )
 
-const machineAPINamespace = "openshift-machine-api"
+const (
+	machineAPINamespace = "openshift-machine-api"
+	// defaultMetricsPort is the default port to expose metrics.
+	defaultMetricsPort = 9191
+)
 
 type Controller struct {
 	config ClusterMachineApproverConfig
@@ -116,10 +125,10 @@ func (c *Controller) handleNewCSR(key string) error {
 	if err != nil {
 		return fmt.Errorf("failed to list machines: %v", err)
 	}
-
 	maxPending := getMaxPending(machines.Items)
+	atomic.StoreUint32(&maxPendingCSRs, uint32(maxPending))
 	if pending := recentlyPendingCSRs(c.indexer); pending > maxPending {
-		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", pending, maxPending, maxPendingCSRs)
+		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", pending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
 		return nil
 	}
 
@@ -152,7 +161,7 @@ func (c *Controller) handleNewCSR(key string) error {
 }
 
 func getMaxPending(machines []v1beta1.Machine) int {
-	return len(machines) + maxPendingCSRs
+	return len(machines) + maxDiffBetweenPendingCSRsAndMachinesCount
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.
@@ -263,10 +272,38 @@ func main() {
 	// Now let's start the controller
 	stop := make(chan struct{})
 	defer close(stop)
+	startMetricsCollectionAndServer(indexer)
 	go controller.Run(1, stop)
 
 	// Wait forever
 	select {}
+}
+
+func startMetricsCollectionAndServer(indexer cache.Indexer) {
+	metricsCollector := NewMetricsCollector(indexer)
+	prometheus.MustRegister(metricsCollector)
+	metricsPort := defaultMetricsPort
+	if port, ok := os.LookupEnv("METRICS_PORT"); ok {
+		v, err := strconv.Atoi(port)
+		if err != nil {
+			klog.Fatalf("Error parsing METRICS_PORT (%q) environment variable: %v", port, err)
+		}
+		metricsPort = v
+	}
+	klog.V(4).Info("Starting server to serve prometheus metrics")
+	go startHTTPMetricServer(fmt.Sprintf("127.0.0.1:%d", metricsPort))
+}
+
+func startHTTPMetricServer(metricsPort string) {
+	mux := http.NewServeMux()
+	//TODO(vikasc): Use promhttp package for handler. This is Deprecated
+	mux.Handle("/metrics", prometheus.Handler())
+
+	server := &http.Server{
+		Addr:    metricsPort,
+		Handler: mux,
+	}
+	klog.Fatal(server.ListenAndServe())
 }
 
 // parseCSR extracts the CSR from the API object and decodes it.
