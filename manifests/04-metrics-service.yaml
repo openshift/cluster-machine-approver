@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: machine-approver
+  namespace: openshift-cluster-machine-approver
+  annotations:
+    service.alpha.openshift.io/serving-cert-secret-name: machine-approver-tls
+  labels:
+    app: machine-approver
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: https
+    port: 9192
+    targetPort: https
+  selector:
+    app: machine-approver
+  sessionAffinity: None
