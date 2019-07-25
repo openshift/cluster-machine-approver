@@ -23,7 +23,7 @@ const (
 	nodeUserPrefix = nodeUser + ":"
 
 	maxPendingDelta = time.Hour
-	maxPendingCSRs  = 100
+	maxPendingOver  = 100
 
 	nodeBootstrapperUsername = "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper"
 
