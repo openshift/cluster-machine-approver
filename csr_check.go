@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	altInternalDNS = "AltInternalDNS"
 	nodeUser       = "system:node"
 	nodeGroup      = "system:nodes"
 	nodeUserPrefix = nodeUser + ":"
@@ -151,7 +152,7 @@ func authorizeCSR(config ClusterMachineApproverConfig, machines []v1beta1.Machin
 		var foundSan bool
 		for _, addr := range targetMachine.Status.Addresses {
 			switch addr.Type {
-			case corev1.NodeInternalDNS, corev1.NodeExternalDNS, corev1.NodeHostName:
+			case corev1.NodeInternalDNS, corev1.NodeExternalDNS, corev1.NodeHostName, altInternalDNS:
 				if san == addr.Address {
 					foundSan = true
 					break
