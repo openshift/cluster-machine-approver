@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"time"
 
-	machinev1beta1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,20 +116,11 @@ func (c *Controller) handleNewCSR(key string) error {
 		return fmt.Errorf("failed to list machines: %v", err)
 	}
 
-	csrsList, err := c.csrs.List(metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list all csrs: %v", err)
-	}
-
-	maxPending := maxPendingTotal(csrsList.Items, machines.Items, maxPendingOver)
-	if err != nil {
-		return err
-	}
+	maxPending := len(machines.Items) + maxPendingCSRs
 
 	if pending := recentlyPendingCSRs(c.indexer); pending > maxPending {
-		klog.Error("Difference between pending CSRs and machines > 100", pending)
 		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d", pending, maxPending)
-		return nil
+		return fmt.Errorf("Difference between pending CSRs and machines > 100: %v", pending)
 	}
 
 	parsedCSR, err := parseCSR(csr)
@@ -159,33 +149,6 @@ func (c *Controller) handleNewCSR(key string) error {
 	klog.Infof("CSR %s approved", csr.Name)
 
 	return nil
-}
-
-func maxPendingTotal(csrs []certificatesv1beta1.CertificateSigningRequest, machines []machinev1beta1.Machine, maxPendingCSRs int) int {
-	pendingMachinesCount := 0
-	for _, machine := range machines {
-		if machine.Status.NodeRef == nil {
-			pendingMachinesCount++
-		}
-	}
-
-	// Since server-side certs are issued after client side is approved, we
-	// need to get a count of 'approved' csrs as well; approved csrs are
-	// cleaned up automatically after approval.
-	approvedCount := 0
-	for _, csreq := range csrs {
-		if isApproved(&csreq) {
-			approvedCount++
-		}
-	}
-	mpt := maxPendingCSRs + pendingMachinesCount + approvedCount
-
-	// If for some reason we see a really high approved count, just set
-	// absolute max to total machines + maxPendingCSRs
-	if approvedCount > len(machines) {
-		mpt = len(machines) + maxPendingCSRs
-	}
-	return mpt
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.
