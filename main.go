@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 
+	"github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	mapiclient "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset"
 	machinev1beta1client "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset/typed/machine/v1beta1"
 )
@@ -116,7 +117,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		return fmt.Errorf("failed to list machines: %v", err)
 	}
 
-	maxPending := len(machines.Items) + maxPendingCSRs
+	maxPending := getMaxPending(machines.Items)
 
 	if pending := recentlyPendingCSRs(c.indexer); pending > maxPending {
 		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d", pending, maxPending)
@@ -149,6 +150,10 @@ func (c *Controller) handleNewCSR(key string) error {
 	klog.Infof("CSR %s approved", csr.Name)
 
 	return nil
+}
+
+func getMaxPending(machines []v1beta1.Machine) int {
+	return len(machines) + maxPendingCSRs
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.
