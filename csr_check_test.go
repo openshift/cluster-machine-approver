@@ -230,7 +230,7 @@ Certificate Request:
         Subject: O = system:nodes, CN = system:node:monkey
 ...
         Requested Extensions:
-            X509v3 Subject Alternative Name: 
+            X509v3 Subject Alternative Name:
                 DNS:banana
 ...
 -----BEGIN CERTIFICATE REQUEST-----
@@ -1903,7 +1903,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR purple creation time 2000-01-01 02:32:00 +0000 UTC not in range (2000-01-01 02:32:50 +0000 UTC, 2000-01-01 02:43:00 +0000 UTC)",
+			wantErr: "CSR purple creation time 2000-01-01 02:32:00 +0000 UTC not in range (2000-01-01 02:32:50 +0000 UTC, 2000-01-01 04:33:00 +0000 UTC)",
 		},
 		{
 			name: "client good but CSR too late",
@@ -1938,7 +1938,7 @@ func Test_authorizeCSR(t *testing.T) {
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "red",
-						CreationTimestamp: creationTimestamp(15 * time.Minute),
+						CreationTimestamp: creationTimestamp(25 * time.Hour),
 					},
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1956,7 +1956,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR red creation time 2000-01-01 02:45:00 +0000 UTC not in range (2000-01-01 02:32:50 +0000 UTC, 2000-01-01 02:43:00 +0000 UTC)",
+			wantErr: "CSR red creation time 2000-01-02 03:30:00 +0000 UTC not in range (2000-01-01 02:32:50 +0000 UTC, 2000-01-01 04:33:00 +0000 UTC)",
 		},
 	}
 	for _, tt := range tests {
