@@ -28,7 +28,7 @@ const (
 	nodeBootstrapperUsername = "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper"
 
 	maxMachineClockSkew = 10 * time.Second
-	maxMachineDelta     = 10 * time.Minute
+	maxMachineDelta     = 2 * time.Hour
 )
 
 var nodeBootstrapperGroups = sets.NewString(
