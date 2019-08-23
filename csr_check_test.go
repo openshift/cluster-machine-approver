@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/x509"
 	stderrors "errors"
 	"testing"
 	"time"
@@ -307,6 +308,7 @@ func Test_authorizeCSR(t *testing.T) {
 		nodeErr  error
 		req      *certificatesv1beta1.CertificateSigningRequest
 		csr      string
+		ca       *x509.CertPool
 	}
 	tests := []struct {
 		name    string
@@ -482,28 +484,6 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: goodCSR,
 			},
 			wantErr: "No target machine for node \"test\"",
-		},
-		{
-			name: "no-machine-status",
-			args: args{
-				machines: nil,
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
-						},
-						Username: "system:node:test",
-						Groups: []string{
-							"system:authenticated",
-							"system:nodes",
-						},
-					},
-				},
-				csr: goodCSR,
-			},
-			wantErr: "Invalid request",
 		},
 		{
 			name: "missing-groups-1",
@@ -1968,8 +1948,105 @@ func Test_authorizeCSR(t *testing.T) {
 			}
 			nodes := &testNode{t: t, name: tt.args.nodeName, err: tt.args.nodeErr}
 
-			if err := authorizeCSR(tt.args.config, tt.args.machines, nodes, tt.args.req, parsedCSR); errString(err) != tt.wantErr {
+			if err := authorizeCSR(tt.args.config, tt.args.machines, nodes, tt.args.req, parsedCSR, tt.args.ca); errString(err) != tt.wantErr {
 				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestAuthorizeServingRenewal(t *testing.T) {
+	// TODO(bison): Need actual coverage here.
+	tests := []struct {
+		name        string
+		nodeName    string
+		csr         *x509.CertificateRequest
+		currentCert *x509.Certificate
+		ca          *x509.CertPool
+		wantErr     string
+	}{
+		{
+			name:     "missing args",
+			nodeName: "panda",
+			wantErr:  "CSR, serving cert, or CA not provided",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := authorizeServingRenewal(
+				tt.nodeName,
+				tt.csr,
+				tt.currentCert,
+				tt.ca,
+			)
+
+			if errString(err) != tt.wantErr {
+				t.Errorf("got: %v, want: %s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNodeInternalIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		node    *corev1.Node
+		wantIP  string
+		wantErr string
+	}{
+		{
+			name: "no addresses",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "no-addresses",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{},
+				},
+			},
+			wantErr: "node no-addresses has no internal addresses",
+		},
+		{
+			name: "no internal ip",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "no-internal-ip",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{
+						{Type: corev1.NodeHostName, Address: "host.example.com"},
+					},
+				},
+			},
+			wantErr: "node no-internal-ip has no internal addresses",
+		},
+		{
+			name: "has internal ip",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "has-internal-ip",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{
+						{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+					},
+				},
+			},
+			wantIP: "10.0.0.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip, err := nodeInternalIP(tt.node)
+
+			if errString(err) != tt.wantErr {
+				t.Errorf("got: %v, want: %s", err, tt.wantErr)
+			}
+
+			if ip != tt.wantIP {
+				t.Errorf("got: %v, want: %s", err, tt.wantIP)
 			}
 		})
 	}

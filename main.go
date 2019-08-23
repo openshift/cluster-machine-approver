@@ -42,10 +42,16 @@ import (
 	machinev1beta1client "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset/typed/machine/v1beta1"
 )
 
-const machineAPINamespace = "openshift-machine-api"
+const (
+	kubeletCAConfigMap  = "csr-controller-ca"
+	configNamespace     = "openshift-config-managed"
+	machineAPINamespace = "openshift-machine-api"
+)
 
 type Controller struct {
 	config ClusterMachineApproverConfig
+
+	client *kubernetes.Clientset
 
 	csrs     certificatesv1beta1client.CertificateSigningRequestInterface
 	nodes    corev1client.NodeInterface
@@ -60,6 +66,8 @@ func NewController(config ClusterMachineApproverConfig, clientset *kubernetes.Cl
 	return &Controller{
 		config: config,
 
+		client: clientset,
+
 		csrs:     clientset.CertificatesV1beta1().CertificateSigningRequests(),
 		nodes:    clientset.CoreV1().Nodes(),
 		machines: machineClientset.MachineV1beta1().Machines(machineAPINamespace),
@@ -68,6 +76,29 @@ func NewController(config ClusterMachineApproverConfig, clientset *kubernetes.Cl
 		queue:    queue,
 		informer: informer,
 	}
+}
+
+// getKubeletCA fetches the kubelet CA from the ConfigMap in the
+// openshift-config-managed namespace.
+func (c *Controller) getKubeletCA() (*x509.CertPool, error) {
+	configMap, err := c.client.CoreV1().ConfigMaps(configNamespace).
+		Get(kubeletCAConfigMap, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	caBundle, ok := configMap.Data["ca-bundle.crt"]
+	if !ok {
+		return nil, fmt.Errorf("no ca-bundle.crt in %s", kubeletCAConfigMap)
+	}
+
+	certPool := x509.NewCertPool()
+
+	if ok := certPool.AppendCertsFromPEM([]byte(caBundle)); !ok {
+		return nil, fmt.Errorf("failed to parse ca-bundle.crt in %s", kubeletCAConfigMap)
+	}
+
+	return certPool, nil
 }
 
 func (c *Controller) processNextItem() bool {
@@ -129,7 +160,16 @@ func (c *Controller) handleNewCSR(key string) error {
 		return nil
 	}
 
-	if err := authorizeCSR(c.config, machines.Items, c.nodes, csr, parsedCSR); err != nil {
+	// TODO(bison): This is a quick hack, we should watch this and
+	// reload it on change rather than fetching it for each CSR.
+	kubeletCA, err := c.getKubeletCA()
+	if err != nil {
+		// This is not a fatal error.  The renewal authorization flow
+		// depending on the existing serving cert will be skipped.
+		klog.Errorf("failed to get kubelet CA: %v", err)
+	}
+
+	if err := authorizeCSR(c.config, machines.Items, c.nodes, csr, parsedCSR, kubeletCA); err != nil {
 		// Don't deny since it might be someone else's CSR
 		klog.Infof("CSR %s not authorized: %v", csr.Name, err)
 		return err

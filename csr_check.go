@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
+	"reflect"
 	"strings"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 
 	"github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 )
@@ -119,8 +123,15 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 //
 // For server certificates:
 // Names contained in the CSR are checked against addresses in the corresponding node's machine status.
-func authorizeCSR(config ClusterMachineApproverConfig, machines []v1beta1.Machine, nodes corev1client.NodeInterface, req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) error {
-	if len(machines) == 0 || req == nil || csr == nil {
+func authorizeCSR(
+	config ClusterMachineApproverConfig,
+	machines []v1beta1.Machine,
+	nodes corev1client.NodeInterface,
+	req *certificatesv1beta1.CertificateSigningRequest,
+	csr *x509.CertificateRequest,
+	ca *x509.CertPool,
+) error {
+	if req == nil || csr == nil {
 		return fmt.Errorf("Invalid request")
 	}
 
@@ -134,6 +145,28 @@ func authorizeCSR(config ClusterMachineApproverConfig, machines []v1beta1.Machin
 	if err != nil {
 		return err
 	}
+
+	// Check for an existing serving cert from the node.  If found, use the
+	// renewal flow.  Any error connecting to the node, including validation of
+	// the presented cert against the current Kubelet CA, will result in
+	// fallback to the original flow relying on the machine-api.
+	//
+	// This is only supported if we were given a CA to verify against.
+	if ca != nil {
+		servingCert, err := getServingCert(nodes, nodeAsking, ca)
+		if err == nil && servingCert != nil {
+			klog.Infof("authorizing serving cert renewal for %s", nodeAsking)
+			return authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+		}
+
+		if err != nil {
+			klog.Errorf("failed to retrieve current serving cert: %v", err)
+		}
+	}
+
+	// Fall back to the original machine-api based authorization scheme.
+	klog.Infof("No existing serving certificate found for %s", nodeAsking)
+
 	// Check that we have a registered node with the request name
 	targetMachine, ok := findMatchingMachineFromNodeRef(nodeAsking, machines)
 	if !ok {
@@ -236,6 +269,46 @@ func authorizeNodeClientCSR(config ClusterMachineApproverConfig, machines []v1be
 	return nil // approve node client cert
 }
 
+// authorizeServingRenewal will authorize the renewal of a kubelet's serving
+// certificate.
+//
+// The current certificate must be signed by the current CA and not expired.
+// The common name on the current certificate must match the expected value.
+// All Subject Alternate Name values must match between CSR and current cert.
+func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, ca *x509.CertPool) error {
+	if csr == nil || currentCert == nil || ca == nil {
+		return fmt.Errorf("CSR, serving cert, or CA not provided")
+	}
+
+	// Check that the serving cert is signed by the given CA, is not expired,
+	// and is otherwise valid.
+	if _, err := currentCert.Verify(x509.VerifyOptions{Roots: ca}); err != nil {
+		return err
+	}
+
+	// Check that the CN is correct on the current cert.
+	if currentCert.Subject.CommonName != fmt.Sprintf("%s:%s", nodeUser, nodeName) {
+		return fmt.Errorf("current serving cert has bad common name")
+	}
+
+	// Check that the CN matches on the CSR and current cert.
+	if currentCert.Subject.CommonName != csr.Subject.CommonName {
+		return fmt.Errorf("current serving cert and CSR common name mismatch")
+	}
+
+	// Check that all Subject Alternate Name values are equal.
+	match := reflect.DeepEqual(currentCert.DNSNames, csr.DNSNames) &&
+		reflect.DeepEqual(currentCert.IPAddresses, csr.IPAddresses) &&
+		reflect.DeepEqual(currentCert.EmailAddresses, csr.EmailAddresses) &&
+		reflect.DeepEqual(currentCert.URIs, csr.URIs)
+
+	if !match {
+		return fmt.Errorf("CSR Subject Alternate Name values do not match current certificate")
+	}
+
+	return nil
+}
+
 func isReqFromNodeBootstrapper(req *certificatesv1beta1.CertificateSigningRequest) bool {
 	return req.Spec.Username == nodeBootstrapperUsername && nodeBootstrapperGroups.Equal(sets.NewString(req.Spec.Groups...))
 }
@@ -295,4 +368,59 @@ func recentlyPendingCSRs(indexer cache.Indexer) int {
 	}
 
 	return pending
+}
+
+// getServingCert fetches the node by the given name and attempts to connect to
+// its kubelet on the first advertised address.
+//
+// If successful, and the returned TLS certificate is validated against the
+// given CA, the node's serving certificate as presented over the established
+// connection is returned.
+func getServingCert(nodes corev1client.NodeInterface, nodeName string, ca *x509.CertPool) (*x509.Certificate, error) {
+	if ca == nil {
+		return nil, fmt.Errorf("no CA found: will not retrieve serving cert")
+	}
+
+	node, err := nodes.Get(nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	host, err := nodeInternalIP(node)
+	if err != nil {
+		return nil, err
+	}
+
+	port := node.Status.DaemonEndpoints.KubeletEndpoint.Port
+
+	kubelet := fmt.Sprintf("%s:%d", host, port)
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	tlsConfig := &tls.Config{
+		RootCAs:    ca,
+		ServerName: host,
+	}
+
+	klog.Infof("retrieving serving cert from %s (%s)", nodeName, kubelet)
+
+	conn, err := tls.DialWithDialer(dialer, "tcp", kubelet, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	defer conn.Close()
+
+	cert := conn.ConnectionState().PeerCertificates[0]
+
+	return cert, nil
+}
+
+// nodeInternalIP returns the first internal IP for the node.
+func nodeInternalIP(node *corev1.Node) (string, error) {
+	for _, address := range node.Status.Addresses {
+		if address.Type == corev1.NodeInternalIP {
+			return address.Address, nil
+		}
+	}
+
+	return "", fmt.Errorf("node %s has no internal addresses", node.Name)
 }

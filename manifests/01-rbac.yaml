@@ -17,7 +17,7 @@ rules:
   resources:
   - configmaps
   resourceNames:
-  - kubelet-serving-ca
+  - csr-controller-ca
   verbs:
   - get
 
