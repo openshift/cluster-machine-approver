@@ -159,8 +159,8 @@ func (c *Controller) handleErr(err error, key interface{}) {
 		return
 	}
 
-	// This controller retries 5 times if something goes wrong. After that, it stops trying.
-	if c.queue.NumRequeues(key) < 5 {
+	// This controller retries 30 times if something goes wrong. After that, it stops trying.
+	if c.queue.NumRequeues(key) < 30 {
 		klog.Infof("Error syncing csr %v: %v", key, err)
 
 		// Re-enqueue the key rate limited. Based on the rate limiter on the
