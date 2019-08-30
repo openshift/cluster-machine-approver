@@ -102,6 +102,10 @@ func (c *Controller) handleNewCSR(key string) error {
 
 	// do not mutate informer cache
 	csr := obj.(*certificatesv1beta1.CertificateSigningRequest).DeepCopy()
+	return c.processCSR(csr)
+}
+
+func (c *Controller) processCSR(csr *certificatesv1beta1.CertificateSigningRequest) error {
 	// Note that you also have to check the uid if you have a local controlled resource, which
 	// is dependent on the actual instance, to detect that a CSR was recreated with the same name
 	klog.Infof("CSR %s added", csr.Name)
@@ -202,6 +206,17 @@ func (c *Controller) runWorker() {
 	}
 }
 
+func (c *Controller) processPendingCSRS(client *kubernetes.Clientset) error {
+	csrs, err := client.CertificatesV1beta1().CertificateSigningRequests().List(metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, csr := range csrs.Items {
+		c.processCSR(&csr)
+	}
+	return nil
+}
+
 func main() {
 	var (
 		kubeconfig string
@@ -253,6 +268,16 @@ func main() {
 	}, cache.Indexers{})
 
 	controller := NewController(loadConfig(cliConfig), client, machineClient, queue, indexer, informer)
+
+	// Process pending CSRs.
+	// The bootstrap node approves pending CSRs while the cluster is installing.
+	// Once the bootstrap node is destroyed the auto approve script on the
+	// bootstrap node stops. The gap of time between the bootstrap node being
+	// destroyed and the auto approver starting requires a loop through the CSRs
+	// to attempt to approve the pending ones.
+	if err := controller.processPendingCSRS(client); err != nil {
+		klog.Warningf("non-fatal error, could not process pending CSRs: %v", err)
+	}
 
 	// Now let's start the controller
 	stop := make(chan struct{})
