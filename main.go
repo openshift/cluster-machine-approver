@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 
+	"github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	mapiclient "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset"
 	machinev1beta1client "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset/typed/machine/v1beta1"
 )
@@ -111,8 +112,14 @@ func (c *Controller) handleNewCSR(key string) error {
 		return nil
 	}
 
-	if pending := recentlyPendingCSRs(c.indexer); pending > maxPendingCSRs {
-		klog.Infof("ignoring all CSRs as too many recent pending CSRs seen: %d", pending)
+	machines, err := c.machines.List(metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list machines: %v", err)
+	}
+
+	maxPending := getMaxPending(machines.Items)
+	if pending := recentlyPendingCSRs(c.indexer); pending > maxPending {
+		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", pending, maxPending, maxPendingCSRs)
 		return nil
 	}
 
@@ -120,11 +127,6 @@ func (c *Controller) handleNewCSR(key string) error {
 	if err != nil {
 		klog.Infof("error parsing request CSR: %v", err)
 		return nil
-	}
-
-	machines, err := c.machines.List(metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list machines: %v", err)
 	}
 
 	if err := authorizeCSR(c.config, machines.Items, c.nodes, csr, parsedCSR); err != nil {
@@ -147,6 +149,10 @@ func (c *Controller) handleNewCSR(key string) error {
 	klog.Infof("CSR %s approved", csr.Name)
 
 	return nil
+}
+
+func getMaxPending(machines []v1beta1.Machine) int {
+	return len(machines) + maxPendingCSRs
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.

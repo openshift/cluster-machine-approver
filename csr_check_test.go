@@ -2006,3 +2006,20 @@ func (n *testNode) Get(name string, _ metav1.GetOptions) (*corev1.Node, error) {
 
 	return nil, n.err
 }
+
+func TestGetMaxPending(t *testing.T) {
+	ml := []machinev1beta1.Machine{
+		{
+			Status: machinev1beta1.MachineStatus{},
+		},
+		{
+			Status: machinev1beta1.MachineStatus{},
+		},
+	}
+
+	res := getMaxPending(ml)
+	expected := len(ml) + maxPendingCSRs
+	if res != expected {
+		t.Errorf("getMaxPending returned incorrect value: %v, expect: %v", res, expected)
+	}
+}
