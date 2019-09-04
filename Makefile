@@ -6,6 +6,10 @@ test:
 	go test -v .
 .PHONY: test
 
+.PHONY: goimports
+goimports: ## Go fmt your code
+	hack/goimports.sh .
+
 images:
 	imagebuilder -f Dockerfile -t openshift/origin-cluster-machine-approver:latest .
 .PHONY: images
