@@ -407,7 +407,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Doesn't match expected prefix",
+			wantErr: "\"test\" doesn't match expected prefix: \"system:node:\"",
 		},
 		{
 			name: "only-node-prefix",
@@ -481,7 +481,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "No target machine",
+			wantErr: "No target machine for node \"test\"",
 		},
 		{
 			name: "no-machine-status",
@@ -694,7 +694,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Not in system:authenticated",
+			wantErr: "map[\"system:authenticated\":{} \"system:foo-bar\":{}] not in \"system:authenticated\" and \"system:nodes\"",
 		},
 		{
 			name: "usages-missing",
@@ -1028,7 +1028,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: noGroup,
 			},
-			wantErr: "Organization doesn't include system:nodes",
+			wantErr: "Organization [] doesn't include system:nodes",
 		},
 		{
 			name: "csr-extra-addr",
@@ -1255,7 +1255,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientExtraO,
 			},
-			wantErr: "Doesn't match expected prefix",
+			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
 		},
 		{
 			name: "client with DNS",
@@ -1291,7 +1291,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientWithDNS,
 			},
-			wantErr: "Doesn't match expected prefix",
+			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
 		},
 		{
 			name: "client good but extra usage",
@@ -1328,7 +1328,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "Doesn't match expected prefix",
+			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
 		},
 		{
 			name: "client good but wrong usage",
@@ -1364,7 +1364,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "Doesn't match expected prefix",
+			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
 		},
 		{
 			name: "client good but missing usage",
@@ -1399,7 +1399,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "Doesn't match expected prefix",
+			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
 		},
 		{
 			name: "client good but wrong CN",
@@ -1435,7 +1435,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientWrongCN,
 			},
-			wantErr: "Doesn't match expected prefix",
+			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
 		},
 		{
 			name: "client good but wrong user",

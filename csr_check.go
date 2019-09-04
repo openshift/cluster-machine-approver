@@ -39,7 +39,7 @@ var nodeBootstrapperGroups = sets.NewString(
 
 func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
-		return "", fmt.Errorf("Doesn't match expected prefix")
+		return "", fmt.Errorf("%q doesn't match expected prefix: %q", req.Spec.Username, nodeUserPrefix)
 	}
 
 	nodeAsking := strings.TrimPrefix(req.Spec.Username, nodeUserPrefix)
@@ -55,7 +55,7 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 	}
 	groupSet := sets.NewString(req.Spec.Groups...)
 	if !groupSet.HasAll(nodeGroup, "system:authenticated") {
-		return "", fmt.Errorf("Not in system:authenticated")
+		return "", fmt.Errorf("%q not in %q and %q", groupSet, "system:authenticated", nodeGroup)
 	}
 
 	// Check usages, we need only:
@@ -82,7 +82,7 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 		string(certificatesv1beta1.UsageKeyEncipherment),
 		string(certificatesv1beta1.UsageServerAuth),
 	) {
-		return "", fmt.Errorf("Missing usages")
+		return "", fmt.Errorf("%q is missing usages", usageSet)
 	}
 
 	// Check subject: O = system:nodes, CN = system:node:ip-10-0-152-205.ec2.internal
@@ -98,7 +98,7 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 		}
 	}
 	if !hasOrg {
-		return "", fmt.Errorf("Organization doesn't include %s", nodeGroup)
+		return "", fmt.Errorf("Organization %v doesn't include %s", csr.Subject.Organization, nodeGroup)
 	}
 
 	return nodeAsking, nil
@@ -137,7 +137,7 @@ func authorizeCSR(config ClusterMachineApproverConfig, machines []v1beta1.Machin
 	// Check that we have a registered node with the request name
 	targetMachine, ok := findMatchingMachineFromNodeRef(nodeAsking, machines)
 	if !ok {
-		return fmt.Errorf("No target machine")
+		return fmt.Errorf("No target machine for node %q", nodeAsking)
 	}
 
 	// SAN checks for both DNS and IPs, e.g.,
