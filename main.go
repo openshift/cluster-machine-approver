@@ -118,10 +118,9 @@ func (c *Controller) handleNewCSR(key string) error {
 	}
 
 	maxPending := getMaxPending(machines.Items)
-
 	if pending := recentlyPendingCSRs(c.indexer); pending > maxPending {
-		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d", pending, maxPending)
-		return fmt.Errorf("Difference between pending CSRs and machines > 100: %v", pending)
+		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", pending, maxPending, maxPendingCSRs)
+		return nil
 	}
 
 	parsedCSR, err := parseCSR(csr)
