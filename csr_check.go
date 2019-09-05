@@ -37,25 +37,25 @@ var nodeBootstrapperGroups = sets.NewString(
 	"system:authenticated",
 )
 
-func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
+func isNodeServingCert(req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) (bool, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
-		return "", fmt.Errorf("%q doesn't match expected prefix: %q", req.Spec.Username, nodeUserPrefix)
+		return false, fmt.Errorf("%q doesn't match expected prefix: %q", req.Spec.Username, nodeUserPrefix)
 	}
 
 	nodeAsking := strings.TrimPrefix(req.Spec.Username, nodeUserPrefix)
 	if len(nodeAsking) == 0 {
-		return "", fmt.Errorf("Empty name")
+		return false, fmt.Errorf("%q has empty node name", req.Spec.Username)
 	}
 
 	// Check groups, we need at least:
 	// - system:nodes
 	// - system:authenticated
 	if len(req.Spec.Groups) < 2 {
-		return "", fmt.Errorf("Too few groups")
+		return false, fmt.Errorf("Too few groups %v", req.Spec.Groups)
 	}
 	groupSet := sets.NewString(req.Spec.Groups...)
 	if !groupSet.HasAll(nodeGroup, "system:authenticated") {
-		return "", fmt.Errorf("%q not in %q and %q", groupSet, "system:authenticated", nodeGroup)
+		return false, fmt.Errorf("%q not in %q and %q", groupSet, "system:authenticated", nodeGroup)
 	}
 
 	// Check usages, we need only:
@@ -63,7 +63,7 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 	// - key encipherment
 	// - server auth
 	if len(req.Spec.Usages) != 3 {
-		return "", fmt.Errorf("Too few usages")
+		return false, fmt.Errorf("Too few usages %v", req.Spec.Usages)
 	}
 
 	usages := make([]string, 0)
@@ -73,7 +73,7 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 
 	// No extra usages!
 	if len(usages) != 3 {
-		return "", fmt.Errorf("Unexpected usages: %d", len(usages))
+		return false, fmt.Errorf("Unexpected usages: %d", len(usages))
 	}
 
 	usageSet := sets.NewString(usages...)
@@ -82,12 +82,12 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 		string(certificatesv1beta1.UsageKeyEncipherment),
 		string(certificatesv1beta1.UsageServerAuth),
 	) {
-		return "", fmt.Errorf("%q is missing usages", usageSet)
+		return false, fmt.Errorf("%q is missing usages", usageSet)
 	}
 
 	// Check subject: O = system:nodes, CN = system:node:ip-10-0-152-205.ec2.internal
 	if csr.Subject.CommonName != req.Spec.Username {
-		return "", fmt.Errorf("Mismatched CommonName %s != %s", csr.Subject.CommonName, req.Spec.Username)
+		return false, fmt.Errorf("Mismatched CommonName %s != %s", csr.Subject.CommonName, req.Spec.Username)
 	}
 
 	var hasOrg bool
@@ -98,10 +98,10 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 		}
 	}
 	if !hasOrg {
-		return "", fmt.Errorf("Organization %v doesn't include %s", csr.Subject.Organization, nodeGroup)
+		return false, fmt.Errorf("Organization %v doesn't include %s", csr.Subject.Organization, nodeGroup)
 	}
 
-	return nodeAsking, nil
+	return true, nil
 }
 
 // authorizeCSR authorizes the CertificateSigningRequest req for a node's client or server certificate.
@@ -128,12 +128,20 @@ func authorizeCSR(config ClusterMachineApproverConfig, machines []v1beta1.Machin
 		return authorizeNodeClientCSR(config, machines, nodes, req, csr)
 	}
 
-	// node serving cert validation after this point
-
-	nodeAsking, err := validateCSRContents(req, csr)
-	if err != nil {
-		return err
+	isNodeServingCert, err := isNodeServingCert(req, csr)
+	if isNodeServingCert {
+		return authorizeNodeServingCSR(machines, req, csr)
 	}
+
+	return err
+}
+
+func authorizeNodeServingCSR(machines []v1beta1.Machine, req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) error {
+	nodeAsking := strings.TrimPrefix(req.Spec.Username, nodeUserPrefix)
+	if len(nodeAsking) == 0 {
+		return fmt.Errorf("Empty name")
+	}
+
 	// Check that we have a registered node with the request name
 	targetMachine, ok := findMatchingMachineFromNodeRef(nodeAsking, machines)
 	if !ok {

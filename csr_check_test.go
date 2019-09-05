@@ -455,7 +455,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Empty name",
+			wantErr: "\"system:node:\" has empty node name",
 		},
 		{
 			name: "no-machine-status-ref",
@@ -550,7 +550,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few groups",
+			wantErr: "Too few groups [system:nodes]",
 		},
 		{
 			name: "missing-groups-2",
@@ -597,7 +597,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few groups",
+			wantErr: "Too few groups [system:authenticated]",
 		},
 		{
 			name: "extra-group",
@@ -741,7 +741,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr: "Too few usages [digital signature server auth]",
 		},
 		{
 			name: "usages-missing-1",
@@ -788,7 +788,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr: "Too few usages [key encipherment server auth]",
 		},
 		{
 			name: "usage-missing-2",
@@ -835,7 +835,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr: "Too few usages [digital signature key encipherment]",
 		},
 		{
 			name: "usage-extra",
@@ -884,7 +884,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr: "Too few usages [digital signature key encipherment server auth signing]",
 		},
 		{
 			name: "csr-cn",

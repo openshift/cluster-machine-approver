@@ -45,7 +45,7 @@ func isNodeClientCert(csr *capi.CertificateSigningRequest, x509cr *x509.Certific
 	if !hasExactUsages(csr, kubeletClientUsages) {
 		return false
 	}
-	if !strings.HasPrefix(x509cr.Subject.CommonName, "system:node:") {
+	if !strings.HasPrefix(x509cr.Subject.CommonName, nodeUserPrefix) {
 		return false
 	}
 	return true
