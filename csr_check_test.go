@@ -1452,7 +1452,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR green for node client cert has wrong user",
+			wantErr: "CSR green for node client cert has wrong user system:serviceaccount:openshift-machine-config-operator:node-bootstrapper-not or groups map[system:authenticated:{} system:serviceaccounts:{} system:serviceaccounts:openshift-machine-config-operator:{}]",
 		},
 		{
 			name: "client good but wrong user group",
@@ -1490,7 +1490,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR blue for node client cert has wrong user",
+			wantErr: "CSR blue for node client cert has wrong user system:serviceaccount:openshift-machine-config-operator:node-bootstrapper or groups map[extra-group:{} system:authenticated:{} system:serviceaccounts:{} system:serviceaccounts:openshift-machine-config-operator:{}]",
 		},
 		{
 			name: "client good but empty name",

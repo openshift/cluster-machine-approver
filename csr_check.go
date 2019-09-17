@@ -233,7 +233,7 @@ func authorizeNodeClientCSR(config ClusterMachineApproverConfig, machines []v1be
 	}
 
 	if !isReqFromNodeBootstrapper(req) {
-		return fmt.Errorf("CSR %s for node client cert has wrong user", req.Name)
+		return fmt.Errorf("CSR %s for node client cert has wrong user %s or groups %s", req.Name, req.Spec.Username, sets.NewString(req.Spec.Groups...))
 	}
 
 	nodeName := strings.TrimPrefix(csr.Subject.CommonName, nodeUserPrefix)
