@@ -156,7 +156,12 @@ func authorizeCSR(
 		servingCert, err := getServingCert(nodes, nodeAsking, ca)
 		if err == nil && servingCert != nil {
 			klog.Infof("authorizing serving cert renewal for %s", nodeAsking)
-			return authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+			authorizeErr := authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+			if authorizeErr == nil {
+				return nil
+			}
+			// Don't return here so we can fallback to machine-api check.
+			klog.Errorf("%v: unable to validated existing serving cert for node %v: %v", req.Name, nodeAsking, authorizeErr)
 		}
 
 		if err != nil {
@@ -165,7 +170,7 @@ func authorizeCSR(
 	}
 
 	// Fall back to the original machine-api based authorization scheme.
-	klog.Infof("No existing serving certificate found for %s", nodeAsking)
+	klog.Infof("%v: Falling back to machine-api based check %s", req.Name, nodeAsking)
 
 	// Check that we have a registered node with the request name
 	targetMachine, ok := findMatchingMachineFromNodeRef(nodeAsking, machines)
