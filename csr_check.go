@@ -5,7 +5,9 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -297,10 +299,10 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 	}
 
 	// Check that all Subject Alternate Name values are equal.
-	match := reflect.DeepEqual(currentCert.DNSNames, csr.DNSNames) &&
-		reflect.DeepEqual(currentCert.IPAddresses, csr.IPAddresses) &&
-		reflect.DeepEqual(currentCert.EmailAddresses, csr.EmailAddresses) &&
-		reflect.DeepEqual(currentCert.URIs, csr.URIs)
+	match := equalStrings(currentCert.DNSNames, csr.DNSNames) &&
+		equalStrings(currentCert.EmailAddresses, csr.EmailAddresses) &&
+		equalIPAddresses(currentCert.IPAddresses, csr.IPAddresses) &&
+		equalURLs(currentCert.URIs, csr.URIs)
 
 	if !match {
 		return fmt.Errorf("CSR Subject Alternate Name values do not match current certificate")
@@ -423,4 +425,58 @@ func nodeInternalIP(node *corev1.Node) (string, error) {
 	}
 
 	return "", fmt.Errorf("node %s has no internal addresses", node.Name)
+}
+
+// equalStrings tests whether two slices of strings are equal.
+func equalStrings(a, b []string) bool {
+	aCopy := make([]string, len(a))
+	bCopy := make([]string, len(b))
+
+	copy(aCopy, a)
+	copy(bCopy, b)
+
+	sort.Strings(aCopy)
+	sort.Strings(bCopy)
+
+	return reflect.DeepEqual(aCopy, bCopy)
+}
+
+// equalURLs tests whether the string representations of two slices of URLs
+// are equal.
+func equalURLs(a, b []*url.URL) bool {
+	var aStrings, bStrings []string
+
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		aStrings = append(aStrings, a[i].String())
+		bStrings = append(bStrings, b[i].String())
+	}
+
+	sort.Strings(aStrings)
+	sort.Strings(bStrings)
+
+	return reflect.DeepEqual(aStrings, bStrings)
+}
+
+// equalIPAddresses tests whether the string representations of two slices of IP
+// Addresses are equal.
+func equalIPAddresses(a, b []net.IP) bool {
+	var aStrings, bStrings []string
+
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		aStrings = append(aStrings, a[i].String())
+		bStrings = append(bStrings, b[i].String())
+	}
+
+	sort.Strings(aStrings)
+	sort.Strings(bStrings)
+
+	return reflect.DeepEqual(aStrings, bStrings)
 }
