@@ -26,8 +26,8 @@ const (
 	nodeGroup      = "system:nodes"
 	nodeUserPrefix = nodeUser + ":"
 
-	maxPendingDelta = time.Hour
-	maxPendingCSRs  = 100
+	maxPendingDelta                           = time.Hour
+	maxDiffBetweenPendingCSRsAndMachinesCount = 100
 
 	nodeBootstrapperUsername = "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper"
 
@@ -40,6 +40,8 @@ var nodeBootstrapperGroups = sets.NewString(
 	"system:serviceaccounts",
 	"system:authenticated",
 )
+
+var maxPendingCSRs uint32
 
 func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {

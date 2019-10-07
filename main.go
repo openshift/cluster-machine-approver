@@ -157,7 +157,7 @@ func (c *Controller) handleNewCSR(key string) error {
 	maxPending := getMaxPending(machines.Items)
 	atomic.StoreUint32(&maxPendingCSRs, uint32(maxPending))
 	if pending := recentlyPendingCSRs(c.indexer); pending > maxPending {
-		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", pending, maxPending, maxPendingCSRs)
+		klog.Errorf("Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", pending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
 		return nil
 	}
 
@@ -199,7 +199,7 @@ func (c *Controller) handleNewCSR(key string) error {
 }
 
 func getMaxPending(machines []v1beta1.Machine) int {
-	return len(machines) + maxPendingCSRs
+	return len(machines) + maxDiffBetweenPendingCSRsAndMachinesCount
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.
