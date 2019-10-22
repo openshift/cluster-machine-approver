@@ -3,6 +3,9 @@ package main
 import (
 	"crypto/x509"
 	stderrors "errors"
+	"net"
+	"net/url"
+	"reflect"
 	"testing"
 	"time"
 
@@ -2098,5 +2101,183 @@ func TestGetMaxPending(t *testing.T) {
 	expected := len(ml) + maxPendingCSRs
 	if res != expected {
 		t.Errorf("getMaxPending returned incorrect value: %v, expect: %v", res, expected)
+	}
+}
+
+func TestEqualStrings(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        []string
+		b        []string
+		expected bool
+	}{
+		{
+			name:     "both empty",
+			a:        []string{},
+			b:        []string{},
+			expected: true,
+		},
+		{
+			name:     "equal",
+			a:        []string{"a", "b"},
+			b:        []string{"a", "b"},
+			expected: true,
+		},
+		{
+			name:     "different order",
+			a:        []string{"b", "a"},
+			b:        []string{"a", "b"},
+			expected: true,
+		},
+		{
+			name:     "not equal",
+			a:        []string{"a"},
+			b:        []string{"a", "b"},
+			expected: false,
+		},
+		{
+			name:     "duplicates",
+			a:        []string{"a", "a"},
+			b:        []string{"a", "b"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertNoChange(t, tt.a, tt.b, func(t *testing.T) {
+				if equal := equalStrings(tt.a, tt.b); equal != tt.expected {
+					t.Errorf("%v == %v :: wanted %v, got %v",
+						tt.a, tt.b, tt.expected, equal)
+				}
+			})
+		})
+	}
+}
+
+func TestEqualURLs(t *testing.T) {
+	exampleNet, err := url.Parse("http://example.net")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	exampleOrg, err := url.Parse("https://example.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		a        []*url.URL
+		b        []*url.URL
+		expected bool
+	}{
+		{
+			name:     "both empty",
+			a:        []*url.URL{},
+			b:        []*url.URL{},
+			expected: true,
+		},
+		{
+			name:     "equal",
+			a:        []*url.URL{exampleNet, exampleOrg},
+			b:        []*url.URL{exampleNet, exampleOrg},
+			expected: true,
+		},
+		{
+			name:     "different order",
+			a:        []*url.URL{exampleOrg, exampleNet},
+			b:        []*url.URL{exampleNet, exampleOrg},
+			expected: true,
+		},
+		{
+			name:     "not equal",
+			a:        []*url.URL{exampleOrg},
+			b:        []*url.URL{exampleNet, exampleOrg},
+			expected: false,
+		},
+		{
+			name:     "duplicates",
+			a:        []*url.URL{exampleOrg, exampleOrg},
+			b:        []*url.URL{exampleNet, exampleOrg},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if equal := equalURLs(tt.a, tt.b); equal != tt.expected {
+				t.Errorf("%v == %v :: wanted %v, got %v",
+					tt.a, tt.b, tt.expected, equal)
+			}
+		})
+	}
+}
+
+func TestEqualIPAddresses(t *testing.T) {
+	tenDotOne := net.ParseIP("10.0.0.1")
+	tenDotTwo := net.ParseIP("10.0.0.2")
+
+	tests := []struct {
+		name     string
+		a        []net.IP
+		b        []net.IP
+		expected bool
+	}{
+		{
+			name:     "both empty",
+			a:        []net.IP{},
+			b:        []net.IP{},
+			expected: true,
+		},
+		{
+			name:     "equal",
+			a:        []net.IP{tenDotOne, tenDotTwo},
+			b:        []net.IP{tenDotOne, tenDotTwo},
+			expected: true,
+		},
+		{
+			name:     "different order",
+			a:        []net.IP{tenDotTwo, tenDotOne},
+			b:        []net.IP{tenDotOne, tenDotTwo},
+			expected: true,
+		},
+		{
+			name:     "not equal",
+			a:        []net.IP{tenDotTwo},
+			b:        []net.IP{tenDotOne, tenDotTwo},
+			expected: false,
+		},
+		{
+			name:     "duplicates",
+			a:        []net.IP{tenDotOne, tenDotOne},
+			b:        []net.IP{tenDotOne, tenDotTwo},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if equal := equalIPAddresses(tt.a, tt.b); equal != tt.expected {
+				t.Errorf("%v == %v :: wanted %v, got %v",
+					tt.a, tt.b, tt.expected, equal)
+			}
+		})
+	}
+}
+
+func assertNoChange(t *testing.T, a, b []string, f func(*testing.T)) {
+	aCopy := make([]string, len(a))
+	bCopy := make([]string, len(b))
+
+	copy(aCopy, a)
+	copy(bCopy, b)
+
+	f(t)
+
+	if !reflect.DeepEqual(aCopy, a) || !reflect.DeepEqual(bCopy, b) {
+		t.Errorf("slice modified unexpectedly: "+
+			"orinigal a = %v, original b = %v, "+
+			"new a = %v, new b = %v", aCopy, bCopy, a, b)
 	}
 }
