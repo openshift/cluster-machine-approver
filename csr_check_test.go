@@ -2098,7 +2098,7 @@ func TestGetMaxPending(t *testing.T) {
 	}
 
 	res := getMaxPending(ml)
-	expected := len(ml) + maxPendingCSRs
+	expected := len(ml) + maxDiffBetweenPendingCSRsAndMachinesCount
 	if res != expected {
 		t.Errorf("getMaxPending returned incorrect value: %v, expect: %v", res, expected)
 	}
