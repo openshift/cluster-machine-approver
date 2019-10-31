@@ -15,7 +15,7 @@ spec:
             message: ClusterMachineApprover has disappeared from Prometheus target
               discovery.
           expr: |
-            absent(up{job="cluster-machine-approver"} == 1)
+            absent(up{job="machine-approver"} == 1)
           for: 10m
           labels:
             severity: critical
