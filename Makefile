@@ -17,3 +17,7 @@ images:
 clean:
 	$(RM) ./cluster-machine-approver
 .PHONY: clean
+
+test-e2e: ## Run e2e tests
+	hack/e2e.sh
+.PHONY: test-e2e
