@@ -34,7 +34,6 @@ spec:
         name: kube-rbac-proxy
         ports:
         - containerPort: 9192
-          hostPort: 9192
           name: https
           protocol: TCP
         resources: {}
