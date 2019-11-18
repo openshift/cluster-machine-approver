@@ -6,6 +6,8 @@ metadata:
   labels:
     app: machine-approver
     machine-approver: "true"
+  annotations:
+    exclude.release.openshift.io/internal-openshift-hosted: "true"
 spec:
   strategy:
     type: Recreate
