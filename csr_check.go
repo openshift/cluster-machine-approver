@@ -157,17 +157,27 @@ func authorizeCSR(
 	if ca != nil {
 		servingCert, err := getServingCert(nodes, nodeAsking, ca)
 		if err == nil && servingCert != nil {
-			klog.Infof("authorizing serving cert renewal for %s", nodeAsking)
-			return authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+			klog.Infof("Found existing serving cert for %s", nodeAsking)
+
+			err := authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+
+			// No error, the renewal is authorized.
+			if err == nil {
+				return nil
+			}
+
+			klog.Warningf("Could not use current serving cert for renewal: %v", err)
+			klog.Warningf("Current SAN Values: %v, CSR SAN Values: %v",
+				certSANs(servingCert), csrSANs(csr))
 		}
 
 		if err != nil {
-			klog.Errorf("failed to retrieve current serving cert: %v", err)
+			klog.Warningf("Failed to retrieve current serving cert: %v", err)
 		}
 	}
 
 	// Fall back to the original machine-api based authorization scheme.
-	klog.Infof("No existing serving certificate found for %s", nodeAsking)
+	klog.Infof("Falling back to machine-api authorization for %s", nodeAsking)
 
 	// Check that we have a registered node with the request name
 	targetMachine, ok := findMatchingMachineFromNodeRef(nodeAsking, machines)
@@ -479,4 +489,50 @@ func equalIPAddresses(a, b []net.IP) bool {
 	sort.Strings(bStrings)
 
 	return reflect.DeepEqual(aStrings, bStrings)
+}
+
+// csrSANs returns the Subject Alternative Name values for the given
+// certificate request as a slice of strings.
+func csrSANs(csr *x509.CertificateRequest) []string {
+	sans := []string{}
+
+	if csr == nil {
+		return sans
+	}
+
+	sans = append(sans, csr.DNSNames...)
+	sans = append(sans, csr.EmailAddresses...)
+
+	for _, ip := range csr.IPAddresses {
+		sans = append(sans, ip.String())
+	}
+
+	for _, uri := range csr.URIs {
+		sans = append(sans, uri.String())
+	}
+
+	return sans
+}
+
+// certSANs returns the Subject Alternative Name values for the given
+// certificate as a slice of strings.
+func certSANs(cert *x509.Certificate) []string {
+	sans := []string{}
+
+	if cert == nil {
+		return sans
+	}
+
+	sans = append(sans, cert.DNSNames...)
+	sans = append(sans, cert.EmailAddresses...)
+
+	for _, ip := range cert.IPAddresses {
+		sans = append(sans, ip.String())
+	}
+
+	for _, uri := range cert.URIs {
+		sans = append(sans, uri.String())
+	}
+
+	return sans
 }
