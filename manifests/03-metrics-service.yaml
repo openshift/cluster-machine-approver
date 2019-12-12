@@ -5,6 +5,7 @@ metadata:
   namespace: openshift-cluster-machine-approver
   annotations:
     service.alpha.openshift.io/serving-cert-secret-name: machine-approver-tls
+    exclude.release.openshift.io/internal-openshift-hosted: "true"
   labels:
     app: machine-approver
 spec:

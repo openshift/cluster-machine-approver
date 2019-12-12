@@ -5,6 +5,8 @@ metadata:
     app: machine-approver
   name: cluster-machine-approver
   namespace: openshift-cluster-machine-approver
+  annotations:
+    exclude.release.openshift.io/internal-openshift-hosted: "true"
 spec:
   endpoints:
     - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token

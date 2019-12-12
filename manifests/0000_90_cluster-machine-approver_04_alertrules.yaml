@@ -6,6 +6,8 @@ metadata:
     role: alert-rules
   name: machineapprover-rules
   namespace: openshift-cluster-machine-approver
+  annotations:
+    exclude.release.openshift.io/internal-openshift-hosted: "true"
 spec:
   groups:
     - name: general.rules
