@@ -2038,6 +2038,20 @@ func TestNodeInternalIP(t *testing.T) {
 			},
 			wantIP: "10.0.0.1",
 		},
+		{
+			name: "has ipv6 address",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "has-ipv6-address",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{
+						{Type: corev1.NodeInternalIP, Address: "2600:1f18:4254:5100:ef8a:7b65:7782:9248"},
+					},
+				},
+			},
+			wantIP: "2600:1f18:4254:5100:ef8a:7b65:7782:9248",
+		},
 	}
 
 	for _, tt := range tests {
