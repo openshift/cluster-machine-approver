@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -405,9 +406,9 @@ func getServingCert(nodes corev1client.NodeInterface, nodeName string, ca *x509.
 		return nil, err
 	}
 
-	port := node.Status.DaemonEndpoints.KubeletEndpoint.Port
+	port := strconv.Itoa(int(node.Status.DaemonEndpoints.KubeletEndpoint.Port))
 
-	kubelet := fmt.Sprintf("%s:%d", host, port)
+	kubelet := net.JoinHostPort(host, port)
 	dialer := &net.Dialer{Timeout: 30 * time.Second}
 	tlsConfig := &tls.Config{
 		RootCAs:    ca,
