@@ -41,6 +41,10 @@ spec:
         resources: {}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
+        resources:
+          requests:
+            memory: 20Mi
+            cpu: 10m
         volumeMounts:
         - mountPath: /etc/kube-rbac-proxy
           name: auth-proxy-config
