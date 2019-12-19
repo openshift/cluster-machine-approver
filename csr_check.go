@@ -5,7 +5,9 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -155,17 +157,27 @@ func authorizeCSR(
 	if ca != nil {
 		servingCert, err := getServingCert(nodes, nodeAsking, ca)
 		if err == nil && servingCert != nil {
-			klog.Infof("authorizing serving cert renewal for %s", nodeAsking)
-			return authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+			klog.Infof("Found existing serving cert for %s", nodeAsking)
+
+			err := authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+
+			// No error, the renewal is authorized.
+			if err == nil {
+				return nil
+			}
+
+			klog.Warningf("Could not use current serving cert for renewal: %v", err)
+			klog.Warningf("Current SAN Values: %v, CSR SAN Values: %v",
+				certSANs(servingCert), csrSANs(csr))
 		}
 
 		if err != nil {
-			klog.Errorf("failed to retrieve current serving cert: %v", err)
+			klog.Warningf("Failed to retrieve current serving cert: %v", err)
 		}
 	}
 
 	// Fall back to the original machine-api based authorization scheme.
-	klog.Infof("No existing serving certificate found for %s", nodeAsking)
+	klog.Infof("Falling back to machine-api authorization for %s", nodeAsking)
 
 	// Check that we have a registered node with the request name
 	targetMachine, ok := findMatchingMachineFromNodeRef(nodeAsking, machines)
@@ -297,10 +309,10 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 	}
 
 	// Check that all Subject Alternate Name values are equal.
-	match := reflect.DeepEqual(currentCert.DNSNames, csr.DNSNames) &&
-		reflect.DeepEqual(currentCert.IPAddresses, csr.IPAddresses) &&
-		reflect.DeepEqual(currentCert.EmailAddresses, csr.EmailAddresses) &&
-		reflect.DeepEqual(currentCert.URIs, csr.URIs)
+	match := equalStrings(currentCert.DNSNames, csr.DNSNames) &&
+		equalStrings(currentCert.EmailAddresses, csr.EmailAddresses) &&
+		equalIPAddresses(currentCert.IPAddresses, csr.IPAddresses) &&
+		equalURLs(currentCert.URIs, csr.URIs)
 
 	if !match {
 		return fmt.Errorf("CSR Subject Alternate Name values do not match current certificate")
@@ -423,4 +435,104 @@ func nodeInternalIP(node *corev1.Node) (string, error) {
 	}
 
 	return "", fmt.Errorf("node %s has no internal addresses", node.Name)
+}
+
+// equalStrings tests whether two slices of strings are equal.
+func equalStrings(a, b []string) bool {
+	aCopy := make([]string, len(a))
+	bCopy := make([]string, len(b))
+
+	copy(aCopy, a)
+	copy(bCopy, b)
+
+	sort.Strings(aCopy)
+	sort.Strings(bCopy)
+
+	return reflect.DeepEqual(aCopy, bCopy)
+}
+
+// equalURLs tests whether the string representations of two slices of URLs
+// are equal.
+func equalURLs(a, b []*url.URL) bool {
+	var aStrings, bStrings []string
+
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		aStrings = append(aStrings, a[i].String())
+		bStrings = append(bStrings, b[i].String())
+	}
+
+	sort.Strings(aStrings)
+	sort.Strings(bStrings)
+
+	return reflect.DeepEqual(aStrings, bStrings)
+}
+
+// equalIPAddresses tests whether the string representations of two slices of IP
+// Addresses are equal.
+func equalIPAddresses(a, b []net.IP) bool {
+	var aStrings, bStrings []string
+
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		aStrings = append(aStrings, a[i].String())
+		bStrings = append(bStrings, b[i].String())
+	}
+
+	sort.Strings(aStrings)
+	sort.Strings(bStrings)
+
+	return reflect.DeepEqual(aStrings, bStrings)
+}
+
+// csrSANs returns the Subject Alternative Name values for the given
+// certificate request as a slice of strings.
+func csrSANs(csr *x509.CertificateRequest) []string {
+	sans := []string{}
+
+	if csr == nil {
+		return sans
+	}
+
+	sans = append(sans, csr.DNSNames...)
+	sans = append(sans, csr.EmailAddresses...)
+
+	for _, ip := range csr.IPAddresses {
+		sans = append(sans, ip.String())
+	}
+
+	for _, uri := range csr.URIs {
+		sans = append(sans, uri.String())
+	}
+
+	return sans
+}
+
+// certSANs returns the Subject Alternative Name values for the given
+// certificate as a slice of strings.
+func certSANs(cert *x509.Certificate) []string {
+	sans := []string{}
+
+	if cert == nil {
+		return sans
+	}
+
+	sans = append(sans, cert.DNSNames...)
+	sans = append(sans, cert.EmailAddresses...)
+
+	for _, ip := range cert.IPAddresses {
+		sans = append(sans, ip.String())
+	}
+
+	for _, uri := range cert.URIs {
+		sans = append(sans, uri.String())
+	}
+
+	return sans
 }
