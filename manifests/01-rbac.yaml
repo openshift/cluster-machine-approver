@@ -57,6 +57,15 @@ rules:
   verbs:
   - update
 - apiGroups:
+  - certificates.k8s.io
+  resourceNames:
+  - kubernetes.io/kube-apiserver-client-kubelet
+  - kubernetes.io/kubelet-serving
+  resources:
+  - signers
+  verbs:
+  - approve
+- apiGroups:
   - machine.openshift.io
   resources:
   - machines
