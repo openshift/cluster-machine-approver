@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -20,8 +22,6 @@ import (
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
-
-	"github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 )
 
 const (
@@ -256,7 +256,7 @@ func authorizeNodeClientCSR(config ClusterMachineApproverConfig, machines []v1be
 		return fmt.Errorf("CSR %s has empty node name", req.Name)
 	}
 
-	_, err := nodes.Get(nodeName, metav1.GetOptions{})
+	_, err := nodes.Get(context.Background(), nodeName, metav1.GetOptions{})
 	switch {
 	case err == nil:
 		return fmt.Errorf("node %s already exists", nodeName)
@@ -396,7 +396,7 @@ func getServingCert(nodes corev1client.NodeInterface, nodeName string, ca *x509.
 		return nil, fmt.Errorf("no CA found: will not retrieve serving cert")
 	}
 
-	node, err := nodes.Get(nodeName, metav1.GetOptions{})
+	node, err := nodes.Get(context.Background(), nodeName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,9 +44,9 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 
-	"github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
-	mapiclient "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset"
-	machinev1beta1client "github.com/openshift/cluster-api/pkg/client/clientset_generated/clientset/typed/machine/v1beta1"
+	"github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
+	mapiclient "github.com/openshift/machine-api-operator/pkg/generated/clientset/versioned"
+	machinev1beta1client "github.com/openshift/machine-api-operator/pkg/generated/clientset/versioned/typed/machine/v1beta1"
 )
 
 const (
@@ -89,7 +91,7 @@ func NewController(config ClusterMachineApproverConfig, clientset *kubernetes.Cl
 // openshift-config-managed namespace.
 func (c *Controller) getKubeletCA() (*x509.CertPool, error) {
 	configMap, err := c.client.CoreV1().ConfigMaps(configNamespace).
-		Get(kubeletCAConfigMap, metav1.GetOptions{})
+		Get(context.Background(), kubeletCAConfigMap, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +152,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		return nil
 	}
 
-	machines, err := c.machines.List(metav1.ListOptions{})
+	machines, err := c.machines.List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list machines: %v", err)
 	}
@@ -189,7 +191,7 @@ func (c *Controller) handleNewCSR(key string) error {
 		LastUpdateTime: metav1.Now(),
 	})
 
-	if _, err := c.csrs.UpdateApproval(csr); err != nil {
+	if _, err := c.csrs.UpdateApproval(context.Background(), csr, metav1.UpdateOptions{}); err != nil {
 		return err
 	}
 
@@ -335,7 +337,7 @@ func startMetricsCollectionAndServer(indexer cache.Indexer) {
 func startHTTPMetricServer(metricsPort string) {
 	mux := http.NewServeMux()
 	//TODO(vikasc): Use promhttp package for handler. This is Deprecated
-	mux.Handle("/metrics", prometheus.Handler())
+	mux.Handle("/metrics", promhttp.Handler())
 
 	server := &http.Server{
 		Addr:    metricsPort,

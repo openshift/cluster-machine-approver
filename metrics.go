@@ -1,10 +1,11 @@
 package main
 
 import (
+	"sync/atomic"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
-	"sync/atomic"
 )
 
 var (
