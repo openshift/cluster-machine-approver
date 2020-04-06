@@ -1,3 +1,10 @@
+GO111MODULE = on
+export GO111MODULE
+GOFLAGS ?= -mod=vendor
+export GOFLAGS
+GOPROXY ?=
+export GOPROXY
+
 all build:
 	go build -o machine-approver .
 .PHONY: all build
