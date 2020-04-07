@@ -1,14 +1,6 @@
 approvers:
   - enxebre
-  - frobware
-  - ingvagabund
-  - spangenberg
-  - vikaschoudhary16
   - michaelgugino
-reviewers:
-  - enxebre
-  - frobware
-  - ingvagabund
-  - spangenberg
-  - vikaschoudhary16
-  - michaelgugino
+  - alexander-demichev
+  - JoelSpeed
+  - elmiko
