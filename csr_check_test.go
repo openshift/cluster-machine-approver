@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/x509"
 	stderrors "errors"
 	"net"
@@ -16,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 
-	machinev1beta1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
+	machinev1beta1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 )
 
 /*
@@ -2093,7 +2094,7 @@ type testNode struct {
 	err  error
 }
 
-func (n *testNode) Get(name string, _ metav1.GetOptions) (*corev1.Node, error) {
+func (n *testNode) Get(_ context.Context, name string, _ metav1.GetOptions) (*corev1.Node, error) {
 	if name != n.name {
 		n.t.Errorf("Get() name = %s, want %s", name, n.name)
 	}
