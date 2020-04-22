@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"time"
 
 	osconfigv1 "github.com/openshift/api/config/v1"
 	osclientset "github.com/openshift/client-go/config/clientset/versioned"
 	osv1client "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
+	"github.com/openshift/library-go/pkg/config/clusteroperator/v1helpers"
 	"github.com/openshift/library-go/pkg/operator/status"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -32,6 +38,11 @@ var relatedObjects = []osconfigv1.ObjectReference{
 		Group:    "",
 		Resource: "namespaces",
 		Name:     clusterOperatorNamespace,
+	},
+	{
+		Group:    "certificates.k8s.io",
+		Resource: "certificatesigningrequests",
+		Name:     "",
 	},
 }
 
@@ -130,10 +141,10 @@ func (c *statusController) processNextItem() bool {
 
 	// TODO(alberto): consider smarter logic.
 	// e.g degraded when recentlyPendingCSRs(c.indexer); pending > maxPending
-	//err := c.statusAvailable()
-	//
+	err := c.statusAvailable()
+
 	// Handle the error if something went wrong during the execution of the business logic
-	//c.handleErr(err, key)
+	c.handleErr(err, key)
 	return true
 }
 
@@ -160,4 +171,96 @@ func (c *statusController) handleErr(err error, key interface{}) {
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	utilruntime.HandleError(err)
 	klog.Infof("Dropping key %q out of the queue: %v", key, err)
+}
+
+// statusAvailable sets the Available condition to True, with the given reason
+// and message, and sets both the Progressing and Degraded conditions to False.
+func (c *statusController) statusAvailable() error {
+	co, err := c.getOrCreateClusterOperator()
+	if err != nil {
+		return err
+	}
+
+	conds := []osconfigv1.ClusterOperatorStatusCondition{
+		{
+			Type:               osconfigv1.OperatorAvailable,
+			Status:             osconfigv1.ConditionTrue,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "",
+			Message:            fmt.Sprintf("Cluster Machine Approver is available at %s", c.versionGetter.GetVersions()["operator"]),
+		},
+		{
+			Type:               osconfigv1.OperatorDegraded,
+			Status:             osconfigv1.ConditionFalse,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "",
+			Message:            "",
+		},
+		{
+			Type:               osconfigv1.OperatorProgressing,
+			Status:             osconfigv1.ConditionFalse,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "",
+			Message:            "",
+		},
+		{
+			Type:               osconfigv1.OperatorUpgradeable,
+			Status:             osconfigv1.ConditionTrue,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "",
+			Message:            "",
+		},
+	}
+
+	co.Status.Versions = []osconfigv1.OperandVersion{{Name: "operator", Version: getReleaseVersion()}}
+	return c.syncStatus(co, conds)
+}
+
+func (c *statusController) getOrCreateClusterOperator() (*osconfigv1.ClusterOperator, error) {
+	var co *osconfigv1.ClusterOperator
+
+	co, err := c.clusterOperators.Get(context.Background(), clusterOperatorName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		klog.Infof("ClusterOperator does not exist, creating a new one.")
+		co = &osconfigv1.ClusterOperator{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: clusterOperatorName,
+			},
+			Status: osconfigv1.ClusterOperatorStatus{},
+		}
+
+		co, err = c.clusterOperators.Create(context.Background(), co, metav1.CreateOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cluster operator: %v", err)
+		}
+		return co, nil
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clusterOperator %q: %v", clusterOperatorName, err)
+	}
+	return co, nil
+}
+
+//syncStatus applies the new condition to the mao ClusterOperator object.
+func (c *statusController) syncStatus(co *osconfigv1.ClusterOperator, conds []osconfigv1.ClusterOperatorStatusCondition) error {
+	for _, c := range conds {
+		v1helpers.SetStatusCondition(&co.Status.Conditions, c)
+	}
+
+	if !equality.Semantic.DeepEqual(co.Status.RelatedObjects, relatedObjects) {
+		co.Status.RelatedObjects = relatedObjects
+	}
+
+	_, err := c.clusterOperators.UpdateStatus(context.Background(), co, metav1.UpdateOptions{})
+	return err
+}
+
+func getReleaseVersion() string {
+	releaseVersion := os.Getenv(releaseVersionEnvVariableName)
+	if len(releaseVersion) == 0 {
+		releaseVersion = unknownVersionValue
+		klog.Infof("%s environment variable is missing, defaulting to %q", releaseVersionEnvVariableName, unknownVersionValue)
+	}
+	return releaseVersion
 }
