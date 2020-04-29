@@ -10,8 +10,12 @@ all build:
 .PHONY: all build
 
 test:
-	go test -v .
+	KUBEBUILDER_CONTROLPLANE_START_TIMEOUT=10m hack/ci-test.sh
 .PHONY: test
+
+unit:
+	go test -v .
+.PHONY: unit
 
 .PHONY: goimports
 goimports: ## Go fmt your code
@@ -28,3 +32,4 @@ clean:
 test-e2e: ## Run e2e tests
 	hack/e2e.sh
 .PHONY: test-e2e
+

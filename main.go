@@ -28,6 +28,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
+	mapiclient "github.com/openshift/machine-api-operator/pkg/generated/clientset/versioned"
+	machinev1beta1client "github.com/openshift/machine-api-operator/pkg/generated/clientset/versioned/typed/machine/v1beta1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
@@ -43,10 +46,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
-
-	"github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
-	mapiclient "github.com/openshift/machine-api-operator/pkg/generated/clientset/versioned"
-	machinev1beta1client "github.com/openshift/machine-api-operator/pkg/generated/clientset/versioned/typed/machine/v1beta1"
 )
 
 const (
@@ -314,6 +313,10 @@ func main() {
 	defer close(stop)
 	startMetricsCollectionAndServer(indexer)
 	go controller.Run(1, stop)
+
+	statusController := NewStatusController(config)
+	go statusController.Run(1, stop)
+	statusController.versionGetter.SetVersion(operatorVersionKey, getReleaseVersion())
 
 	// Wait forever
 	select {}
