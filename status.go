@@ -30,6 +30,7 @@ const (
 	unknownVersionValue           = "unknown"
 	queueKey                      = "trigger"
 	operatorVersionKey            = "operator"
+	reasonAsExpected              = "AsExpected"
 	releaseVersionEnvVariableName = "RELEASE_VERSION"
 )
 
@@ -186,28 +187,28 @@ func (c *statusController) statusAvailable() error {
 			Type:               osconfigv1.OperatorAvailable,
 			Status:             osconfigv1.ConditionTrue,
 			LastTransitionTime: metav1.Now(),
-			Reason:             "",
+			Reason:             reasonAsExpected,
 			Message:            fmt.Sprintf("Cluster Machine Approver is available at %s", c.versionGetter.GetVersions()["operator"]),
 		},
 		{
 			Type:               osconfigv1.OperatorDegraded,
 			Status:             osconfigv1.ConditionFalse,
 			LastTransitionTime: metav1.Now(),
-			Reason:             "",
+			Reason:             reasonAsExpected,
 			Message:            "",
 		},
 		{
 			Type:               osconfigv1.OperatorProgressing,
 			Status:             osconfigv1.ConditionFalse,
 			LastTransitionTime: metav1.Now(),
-			Reason:             "",
+			Reason:             reasonAsExpected,
 			Message:            "",
 		},
 		{
 			Type:               osconfigv1.OperatorUpgradeable,
 			Status:             osconfigv1.ConditionTrue,
 			LastTransitionTime: metav1.Now(),
-			Reason:             "",
+			Reason:             reasonAsExpected,
 			Message:            "",
 		},
 	}

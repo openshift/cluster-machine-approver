@@ -110,9 +110,13 @@ var _ = Describe("Cluster Operator status controller", func() {
 
 			// check conditions.
 			Expect(v1helpers.IsStatusConditionTrue(co.Status.Conditions, osconfigv1.OperatorAvailable)).To(BeTrue())
+			Expect(v1helpers.FindStatusCondition(co.Status.Conditions, osconfigv1.OperatorAvailable).Reason).To(Equal(reasonAsExpected))
 			Expect(v1helpers.IsStatusConditionTrue(co.Status.Conditions, osconfigv1.OperatorUpgradeable)).To(BeTrue())
+			Expect(v1helpers.FindStatusCondition(co.Status.Conditions, osconfigv1.OperatorUpgradeable).Reason).To(Equal(reasonAsExpected))
 			Expect(v1helpers.IsStatusConditionFalse(co.Status.Conditions, osconfigv1.OperatorDegraded)).To(BeTrue())
+			Expect(v1helpers.FindStatusCondition(co.Status.Conditions, osconfigv1.OperatorDegraded).Reason).To(Equal(reasonAsExpected))
 			Expect(v1helpers.IsStatusConditionFalse(co.Status.Conditions, osconfigv1.OperatorProgressing)).To(BeTrue())
+			Expect(v1helpers.FindStatusCondition(co.Status.Conditions, osconfigv1.OperatorProgressing).Reason).To(Equal(reasonAsExpected))
 
 			// check related objects.
 			Expect(co.Status.RelatedObjects).To(Equal(relatedObjects))
