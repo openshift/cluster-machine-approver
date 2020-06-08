@@ -4,20 +4,18 @@ go 1.15
 
 require (
 	github.com/go-logr/logr v0.2.1 // indirect
-	github.com/go-logr/zapr v0.1.1 // indirect
-	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
-	github.com/googleapis/gnostic v0.5.1 // indirect
-	github.com/onsi/ginkgo v1.12.1
-	github.com/onsi/gomega v1.10.1
-	github.com/openshift/api v0.0.0-20200916161728-83f0cb093902
-	github.com/openshift/client-go v0.0.0-20200827190008-3062137373b5
-	github.com/openshift/library-go v0.0.0-20200917093739-70fa806b210a
-	github.com/openshift/machine-api-operator v0.2.1-0.20200403113723-78edb1bc7d1a
-	github.com/prometheus/client_golang v1.7.1
-	go.uber.org/zap v1.14.1 // indirect
-	k8s.io/api v0.19.0
-	k8s.io/apimachinery v0.19.0
-	k8s.io/client-go v0.19.0
+	github.com/googleapis/gnostic v0.5.3 // indirect
+	github.com/onsi/ginkgo v1.14.2
+	github.com/onsi/gomega v1.10.3
+	github.com/openshift/api v0.0.0-20201023182528-2ed1db6e1551
+	github.com/openshift/cluster-api v0.0.0-20191129101638-b09907ac6668
+	github.com/openshift/library-go v0.0.0-20201026125231-a28d3d1bad23
+	github.com/prometheus/client_golang v1.8.0
+	k8s.io/api v0.19.3
+	k8s.io/apimachinery v0.19.3
+	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 	k8s.io/klog/v2 v2.3.0
-	sigs.k8s.io/controller-runtime v0.6.2
+	sigs.k8s.io/controller-runtime v0.6.3
 )
+
+replace k8s.io/client-go => k8s.io/client-go v0.19.0

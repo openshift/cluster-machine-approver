@@ -6,7 +6,7 @@ GOPROXY ?=
 export GOPROXY
 
 all build:
-	go build -o machine-approver .
+	go build -o machine-approver ./cmd/controller
 .PHONY: all build
 
 test:
@@ -14,19 +14,19 @@ test:
 .PHONY: test
 
 unit:
-	go test -v .
+	go test -v ./...
 .PHONY: unit
 
 .PHONY: goimports
 goimports: ## Go fmt your code
-	hack/goimports.sh .
+	hack/goimports.sh ./...
 
 images:
 	imagebuilder -f Dockerfile -t openshift/origin-cluster-machine-approver:latest .
 .PHONY: images
 
 clean:
-	$(RM) ./cluster-machine-approver
+	$(RM) ./machine-approver
 .PHONY: clean
 
 test-e2e: ## Run e2e tests
