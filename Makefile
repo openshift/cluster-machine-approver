@@ -33,3 +33,8 @@ test-e2e: ## Run e2e tests
 	hack/e2e.sh
 .PHONY: test-e2e
 
+.PHONY: vendor
+vendor:
+	go mod tidy
+	go mod vendor
+	go mod verify
