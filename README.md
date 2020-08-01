@@ -86,7 +86,7 @@ CSR to be approved:
   the `Node`, as found in the CSR.
 * This `Machine` must not have a `NodeRef` set.
 * The CSR creation timestamp must be close to the `Machine` creation timestamp
-  (currently within 10 minutes)
+  (currently within 2 hours)
 * The CSR is for node client auth.
 
 ### Node Server CSR Approval Workflow
