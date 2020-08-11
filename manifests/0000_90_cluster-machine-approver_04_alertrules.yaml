@@ -10,7 +10,7 @@ metadata:
     exclude.release.openshift.io/internal-openshift-hosted: "true"
 spec:
   groups:
-    - name: general.rules
+    - name: cluster-machine-approver.rules
       rules:
         - alert: ClusterMachineApproverDown
           annotations:
