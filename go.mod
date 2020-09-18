@@ -15,9 +15,9 @@ require (
 	github.com/pkg/errors v0.8.2-0.20190227000051-27936f6d90f9 // indirect
 	github.com/prometheus/client_golang v1.1.0
 	go.uber.org/zap v1.14.1 // indirect
-	k8s.io/api v0.18.0
-	k8s.io/apimachinery v0.18.0
-	k8s.io/client-go v0.18.0
+	k8s.io/api v0.18.9
+	k8s.io/apimachinery v0.18.9
+	k8s.io/client-go v0.18.9
 	k8s.io/klog v1.0.0
 	sigs.k8s.io/controller-runtime v0.5.1-0.20200422022352-2189d40ee002
 )
