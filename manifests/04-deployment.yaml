@@ -68,10 +68,6 @@ spec:
         env:
         - name: RELEASE_VERSION
           value: "0.0.1-snapshot"
-        - name: KUBERNETES_SERVICE_PORT
-          value: "6443"
-        - name: KUBERNETES_SERVICE_HOST
-          value: "127.0.0.1"
         - name: METRICS_PORT
           value: "9191"
         terminationMessagePolicy: FallbackToLogsOnError
