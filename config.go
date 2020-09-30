@@ -6,7 +6,7 @@ import (
 
 	kyaml "k8s.io/apimachinery/pkg/util/yaml"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 type ClusterMachineApproverConfig struct {
