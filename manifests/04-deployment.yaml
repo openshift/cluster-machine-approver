@@ -8,6 +8,7 @@ metadata:
     machine-approver: "true"
   annotations:
     exclude.release.openshift.io/internal-openshift-hosted: "true"
+    include.release.openshift.io/self-managed-high-availability: "true"
 spec:
   strategy:
     type: Recreate

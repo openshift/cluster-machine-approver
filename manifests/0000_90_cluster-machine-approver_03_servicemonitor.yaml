@@ -5,6 +5,8 @@ metadata:
     app: machine-approver
   name: cluster-machine-approver
   namespace: openshift-cluster-machine-approver
+  annotations:
+    include.release.openshift.io/self-managed-high-availability: "true"
 spec:
   endpoints:
     - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
