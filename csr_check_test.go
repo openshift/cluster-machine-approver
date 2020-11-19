@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
-	stderrors "errors"
+	"encoding/pem"
+	"fmt"
 	"net"
 	"net/url"
 	"reflect"
@@ -15,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/clock"
+	"k8s.io/apimachinery/pkg/util/sets"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	machinev1beta1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
@@ -38,10 +42,108 @@ import (
     }]
   }
 
-  $ cfssl genkey test_csr.json | cfssljson -bare certificate
+	Generate CSR
+	$ cfssl genkey test_csr.json | cfssljson -bare ca
+
+	Generate server certificate
+	$ cfssl gencert -ca=ca.pem -ca-key=ca-key.pem test_csr.json | cfssljson -bare server
+
+	Generate root certificate
+	$ cfssl gencert -initca test_csr.json | cfssljson -bare root
 */
 
 const (
+	serverCertGood = `-----BEGIN CERTIFICATE-----
+MIIDfTCCAmWgAwIBAgIUbAsUQZRjkLyGoY50hiYPohSchAYwDQYJKoZIhvcNAQEL
+BQAwMjEVMBMGA1UEChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9k
+ZTp0ZXN0MB4XDTIwMTExODIwMTIwMFoXDTIxMTExODIwMTIwMFowMjEVMBMGA1UE
+ChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9kZTp0ZXN0MIIBIjAN
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9w75bQ5bUympW/LYWWE91Lpzc7kJ
+e4MYmJqr8Sa8rCsSykdHsfWpn0oiW28QQY3k1fgB+WeA3FhOoiDsa5anprhJWqDV
+gaAW2jwPq6D2oi3c6YSa80q8n1oTT3LzkLKnDLQx/xwGJDgnXrLfEOqDuy4z5RvS
+wOO5CmTQZRt+FieeVHKLuZhDOE0CJ62HclntNj04IM+sbeHhozz1iWrLz2C3Pm0F
+LIIfmpA2Cb3pp9eUknyxDAur8JatIM3CoEoWEW9wHeqhu8/TkNKGfUdocT88tq4r
++0x4wedQ7vXikBAlF2VBBwVj86jrhDgi2wn4ErEp9dQ322rvRoo5EYFYCQIDAQAB
+o4GKMIGHMA4GA1UdDwEB/wQEAwIFoDAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYB
+BQUHAwIwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUijDhx2Lznrf2OAw+x2d08pVm
+Qa0wKQYDVR0RBCIwIIIFbm9kZTGCC25vZGUxLmxvY2FshwQKAAABhwR/AAABMA0G
+CSqGSIb3DQEBCwUAA4IBAQARJOrMYBokpT/mj1XXN1Z0rpiYcJjzbqmF6BTqn/Z0
+AuW9zJJcAKajcRx7x97LClajvAH7j0qXfw6PJYoFOukJyJzVD93hawNXWBy0xkYg
+u+Xyf2bwoLCS+gHoyXqknOFgaMNCtBBum1+CxxalANfZmeDHbS7ZXcP7u8KAmHJ4
+kqkTSAhi7WeiYlXRQ0YoXy9NSQ25yXrw1Z2PPJbWUZu9jrBHUi9l2EUbcudujxHt
+87fbFaRLZzhRrFqmDK73fhQ3f5ajiw5uwIvVdy3JIXnfau9+ZKJ8aR7Mj74tTecV
+jPZ67rYFh/lRj5PMorF///1taHNXCaR905Wx9WxzPLK/
+-----END CERTIFICATE-----
+`
+	serverKeyGood = `-----BEGIN RSA PRIVATE KEY-----
+MIIEpQIBAAKCAQEA9w75bQ5bUympW/LYWWE91Lpzc7kJe4MYmJqr8Sa8rCsSykdH
+sfWpn0oiW28QQY3k1fgB+WeA3FhOoiDsa5anprhJWqDVgaAW2jwPq6D2oi3c6YSa
+80q8n1oTT3LzkLKnDLQx/xwGJDgnXrLfEOqDuy4z5RvSwOO5CmTQZRt+FieeVHKL
+uZhDOE0CJ62HclntNj04IM+sbeHhozz1iWrLz2C3Pm0FLIIfmpA2Cb3pp9eUknyx
+DAur8JatIM3CoEoWEW9wHeqhu8/TkNKGfUdocT88tq4r+0x4wedQ7vXikBAlF2VB
+BwVj86jrhDgi2wn4ErEp9dQ322rvRoo5EYFYCQIDAQABAoIBAQD2LSae43pekJng
+NEgeL8YjrbIS8qMfPo8IqL6B6b6As97iTkqDai2duoonn7CMEa6fAqQ890SwyxF3
+feT2g8UEXIdDVhXJN1LuHIDk3NxE1/xTd73KhYMUKfYp6XoHiezovLlA4ZTBDG82
+bnfVbEjc//nX5nSHnaIpWDFLPizSNqzJymPlD3hOetPKzZ8e4bjnkil9cTpg4QO6
+3xruCTEmGwG1ApYp7XAE32r2MCQalOf8pKIR+6IvTA1mYZd70geLmj/bbN/Zi6f6
+dGpRzFr2Jx0yPExebjds6UqcdIRxur6w9ya++nmBrKvrGzPjee3NH2rk2ZKySKQ8
+JTtP4J+BAoGBAP/5Nrv/TeCQIaRtYskZrfna8ugXbfYPLSMo+qKvIcpEwFEuaxkH
+K5G7a5UnkJIIWCGUKhQmsCb6amz8SmuH/SmZXEavMMDTIWriOZ1YA5yR4oc+tO1a
+UdM33qrVbMfH8g6kJKRXML1yxoqbSv6RSye1FlfqHp0lcqpQZ1bcVHexAoGBAPcV
+hi+8OMdDyd64EE07N0xmCgd3um1LFn7Wc2W3UA3Fdcp4YJ8pwfmx+BN/48hhZuwa
+AC8o3UHgLv/ypveoBjjA36ARBt20WETByfwJPp5md5mYQSFzsdhsN8t80VagVrGM
+tO/ZZEG5AkhazKm7hYz4NlGOfyyf6tw9CPIkkdPZAoGBAL2hO1pExcXSIQo1+xPu
+EUPjX0ZvbQf3sEG27w6sXYUCL9M0ZyTweeeJiCbEW8bDpb6ijBXHn4IQy90Xfm5x
+HSy/L2wyBxUilEQheftFo89PCBmXa+PWoH2wiyXV3LOYPYt5MKgK69G9gLZYW1OC
+AcJV1kqk568VegAQdq4TpgPRAoGBAPHY66NFxP2maK3L1IkD8TiimCZ/Fsdru/Ui
+y4lASOdx473u3gRsxyU1AfF0OO0mCawINy3x/cBBQz/br3qxyIU8pKb0g5f2sn96
+f85m7hf1jBOXaAjqSaXhJyvSXMVB5Bmd9GzgiLWb9ZQE7Fcm6a32NpTVub1gOm6g
+f2UkTmjhAoGAMr7qeQ1AJrEg5pYEaeYeQ9jvxxvgTOO6Q6gi7K3D/BUSbHukZ8Kd
+keiTZ5+55Pi21jvHNXE/Rn9RrJHkryoPCqnRIuSFigrUMBMiloCzL2j0jCIzbw5n
+iWrekSBGrM0WHjrzgzLwIQY1nuXUx9TZgw+tgXTFt9Grgz0L7NmSyJI=
+-----END RSA PRIVATE KEY-----
+`
+	rootCertGood = `-----BEGIN CERTIFICATE-----
+MIIDSzCCAjOgAwIBAgIUUEs81eUj5S9T5cglpZ0gQV06Y9owDQYJKoZIhvcNAQEL
+BQAwMjEVMBMGA1UEChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9k
+ZTp0ZXN0MB4XDTIwMTExODIwMTEwMFoXDTI1MTExNzIwMTEwMFowMjEVMBMGA1UE
+ChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9kZTp0ZXN0MIIBIjAN
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAukG4TvbrMbVklA2nLmK0T7+SygWR
+Yebsd0vJMWkw87+zxkYY0tEo+y5ijHXucb1S3m4mGulmzxP1KQI/0RDuba1HhekA
+aOxy2TZWYhtQUxCHbrREz3b+OBbDkf2Dzp7Qo6J3l7fYBRCD/AnTzSCaK5LwzmH0
+X3TCJnrLBIf8gFrqAHsCXadNV3JQ2Iip6Gjs8VCqnZHS/oFhXpKiMnrB0IMpC6F2
+1/T4Uoe+vyWoUTZQTAjZVBcIDLp3r8c6FnmF5YjouWafNVfbttVczNpuSt/3YxXL
+b2P/EQfb8QniNUXnkxSNwOpZx6QO2PZHSSBWcW+q+EUeFXsInl41dK5avwIDAQAB
+o1kwVzAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQU
+Hrk7KIVyk8Iio60VmtNhBX8NoWAwFQYDVR0RBA4wDIcECgAAAYcEfwAAATANBgkq
+hkiG9w0BAQsFAAOCAQEAc8MxeqY7IVOfoDrbpeFAmZlmG93WE8Aolzj9rN0ZfQYr
+SuNL644WQVUS0JcJOWpXYP7IBIh1dTSx3eOBnN4Et8t+grKJLMjtGC4+4Q08tOT+
++wmy8vKRk6YDxR38nmhluEUFLdtMCdNsDTgXdOx5r/jE+9b+HCMaTRuejt2rxgNg
+NxxCBFzlUF3qm11AGXU37RobjPciHu+NxLnC7OWvu1xUawf1qryJhd0fahM+ZTQ0
+QweKOXA34JfqaTjLPHob/xaeBZ2zk8JuiPeHnuXUfiBPgkCKfUlidPQH7G2B9QNn
+mhTXEUnJbr+N31t6dGQdnvk88+a7QA1y4ypl9XolWA==
+-----END CERTIFICATE-----
+`
+	differentCert = `-----BEGIN CERTIFICATE-----
+MIIB6zCCAZGgAwIBAgIUNukOeYC/OJTuAHe8x0dZGxo/UPcwCgYIKoZIzj0EAwIw
+SDELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1TYW4gRnJhbmNp
+c2NvMRQwEgYDVQQDEwtleGFtcGxlLm5ldDAeFw0yMDExMTkxMjU1MDBaFw0yNTEx
+MTgxMjU1MDBaMEgxCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMN
+U2FuIEZyYW5jaXNjbzEUMBIGA1UEAxMLZXhhbXBsZS5uZXQwWTATBgcqhkjOPQIB
+BggqhkjOPQMBBwNCAAStQMOkXCI/byn1MPc5KYM1d5NsPF4gexjeKqjJrrHcaTow
+jJAQOslKXAhHKp0y+jhFzr8lQdDrt5eHUK/LfDpKo1kwVzAOBgNVHQ8BAf8EBAMC
+AQYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUhJoVW5gCXH0QwkspeVOA4EBG
+sBMwFQYDVR0RBA4wDIcEfwAAAYcECgAAATAKBggqhkjOPQQDAgNIADBFAiEAzTu+
+fuo0nJuh1ta+w+X7iwhx29AG/1TAPY/S+tnG4OUCIBvy9g6GCEUbgYgwPKF2k8G3
+zrzrJ5SCjYy4UbElrjNx
+-----END CERTIFICATE-----
+`
+	differentKey = `-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIFU6aDkXYwx8YYtXd9AZPIst87daWX49Rzhxsd7D7UwroAoGCCqGSM49
+AwEHoUQDQgAErUDDpFwiP28p9TD3OSmDNXeTbDxeIHsY3iqoya6x3Gk6MIyQEDrJ
+SlwIRyqdMvo4Rc6/JUHQ67eXh1Cvy3w6Sg==
+-----END EC PRIVATE KEY-----
+`
 	goodCSR = `
 Certificate Request:
     Data:
@@ -55,19 +157,19 @@ Certificate Request:
 -----BEGIN CERTIFICATE REQUEST-----
 MIICszCCAZsCAQAwMjEVMBMGA1UEChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBz
 eXN0ZW06bm9kZTp0ZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
-vgPRW4dXOGcys5wOeoQJO8Z+dHhgcQGMJosuNbsykf3znM2xUSB/20aQB5R4f749
-JCOzGICpsHUBVVTWpmEI48TDt85T/ShI9fLrfgpZEoS6pyPRvgaBqZsVxEWSSNj/
-Bjk3/iA4nDItK8r4JFbpjXCXlE0vY/+wMwResNyl5h0KJruwNqDZnPD6vTZaIqUw
-Xxeb4FOAeKxcySea2WnQj2y57pPlm4i9xSKgiNFgdr4Be9PtjhQhYxdguCfXFO8a
-PAFBbOAUgxt2M3yo4hVQqEdMCCJvckqar4a4M7KTUbsmIeClL8/wFfj6duD+ERjp
-Bn6hIrlF/iyHMbhzJC3+XwIDAQABoDwwOgYJKoZIhvcNAQkOMS0wKzApBgNVHREE
+ukG4TvbrMbVklA2nLmK0T7+SygWRYebsd0vJMWkw87+zxkYY0tEo+y5ijHXucb1S
+3m4mGulmzxP1KQI/0RDuba1HhekAaOxy2TZWYhtQUxCHbrREz3b+OBbDkf2Dzp7Q
+o6J3l7fYBRCD/AnTzSCaK5LwzmH0X3TCJnrLBIf8gFrqAHsCXadNV3JQ2Iip6Gjs
+8VCqnZHS/oFhXpKiMnrB0IMpC6F21/T4Uoe+vyWoUTZQTAjZVBcIDLp3r8c6FnmF
+5YjouWafNVfbttVczNpuSt/3YxXLb2P/EQfb8QniNUXnkxSNwOpZx6QO2PZHSSBW
+cW+q+EUeFXsInl41dK5avwIDAQABoDwwOgYJKoZIhvcNAQkOMS0wKzApBgNVHREE
 IjAgggVub2RlMYILbm9kZTEubG9jYWyHBAoAAAGHBH8AAAEwDQYJKoZIhvcNAQEL
-BQADggEBADEcf7HSTQsrjQM4RneAKmt8OKYM0+1haN6vC7K/siGRCLx/YWae6gK1
-haAMxThWRjAExy/SaEX9KBZVaQRdHlA9FVQrz1hwdMgR5OtCFrepiwHAIMRwwyW0
-nS6AyeeWLsoKdQKIXmDkL545Q2FzEVUmSsDTmNsZRU86RJf2gnj4xZiPNDbh5RzC
-zvOecIcfEb0CnoidEHytO964xg5caVKyydku0oR9TrFSio4Oyof5b5oxbBRVJqII
-8N02uj7bRCzZzEJYynYFcwmUA+3+L+pQd0/idOpNUq/2N5MNzDRddIHtNUHorP2Y
-scTUtCJ0MRK3AupLIlqSd+evEMsE/3I=
+BQADggEBAEFFAuuhgUGs7Mhg9hMdj8csuBiLHUah5bkavvi/dwH3CaHpXRAxMwRI
+0K+puuDsHn7Y7xInO2IfyYVaZ6Xr2ppT9u0Hjn9DzN3Wmd/ngTWbWsctvXVMkGw4
+Mkc4v7oq9wBbMDbsT3xKaRqWvxqAsD3NXUVGW4tIJhqZnKk3QtZ70p/q4L4/TbEV
+yOf1lhGA26sAJX4gMeTHUxPu85NedLzTg5DYDyPPvIYPKw7ww8tm2fYb67sr21WU
+p1VlUzB7qtkVJ4coGNFPwl7vu3rps5VPN7ONV9JG8+PVvjxhyQD5ZBqLVPbT7ZGI
+NKbWRRtEF/XLPoZs3kq95YCgn2oQ9ws=
 -----END CERTIFICATE REQUEST-----
 `
 	extraAddr = `
@@ -304,15 +406,60 @@ rj/Dkdwyag==
 `
 )
 
+type fakeCSRLister struct {
+	csrs []*certificatesv1beta1.CertificateSigningRequest
+}
+
+func (f fakeCSRLister) List() []interface{} {
+	objects := make([]interface{}, len(f.csrs))
+	for i, csr := range f.csrs {
+		objects[i] = csr
+	}
+	return objects
+}
+
+var baseTime = time.Date(2020, 11, 19, 0, 0, 0, 0, time.UTC)
+
+func init() {
+	now = clock.NewFakePassiveClock(baseTime).Now
+}
+
 func Test_authorizeCSR(t *testing.T) {
+	defaultPort := int32(25435)
+	defaultAddr := "127.0.0.1"
+	defaultNode := func() *corev1.Node {
+		return &corev1.Node{
+			Status: corev1.NodeStatus{
+				Addresses: []corev1.NodeAddress{
+					{Type: corev1.NodeInternalIP, Address: defaultAddr},
+				},
+				DaemonEndpoints: corev1.NodeDaemonEndpoints{
+					KubeletEndpoint: corev1.DaemonEndpoint{
+						Port: defaultPort,
+					},
+				},
+			},
+		}
+	}
+
+	withName := func(name string, node *corev1.Node) *corev1.Node {
+		node.Name = name
+		return node
+	}
+	withPort := func(port int32, node *corev1.Node) *corev1.Node {
+		node.Status.DaemonEndpoints.KubeletEndpoint.Port = port
+		return node
+	}
+
 	type args struct {
-		config   ClusterMachineApproverConfig
-		machines []machinev1beta1.Machine
-		nodeName string
-		nodeErr  error
-		req      *certificatesv1beta1.CertificateSigningRequest
-		csr      string
-		ca       *x509.CertPool
+		config        ClusterMachineApproverConfig
+		machines      []machinev1beta1.Machine
+		node          *corev1.Node
+		nodeErr       error
+		kubeletServer net.Listener
+		req           *certificatesv1beta1.CertificateSigningRequest
+		csr           string
+		ca            []*x509.Certificate
 	}
 	tests := []struct {
 		name    string
@@ -726,6 +873,53 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: goodCSR,
 			},
 			wantErr: "Too few usages",
+		}, {
+			name: "usages-missing",
+			args: args{
+				machines: []machinev1beta1.Machine{
+					{
+						Status: machinev1beta1.MachineStatus{
+							NodeRef: &corev1.ObjectReference{
+								Name: "test",
+							},
+							Addresses: []corev1.NodeAddress{
+								{
+									Type:    corev1.NodeInternalIP,
+									Address: "127.0.0.1",
+								},
+								{
+									Type:    corev1.NodeExternalIP,
+									Address: "10.0.0.1",
+								},
+								{
+									Type:    corev1.NodeInternalDNS,
+									Address: "node1.local",
+								},
+								{
+									Type:    corev1.NodeExternalDNS,
+									Address: "node1",
+								},
+							},
+						},
+					},
+				},
+				req: &certificatesv1beta1.CertificateSigningRequest{
+					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1beta1.KeyUsage{
+							certificatesv1beta1.UsageDigitalSignature,
+							certificatesv1beta1.UsageKeyEncipherment,
+							certificatesv1beta1.UsageClientAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr: goodCSR,
+			},
+			wantErr: `map["client auth":{} "digital signature":{} "key encipherment":{}] is missing usages`,
 		},
 		{
 			name: "usages-missing-1",
@@ -1184,8 +1378,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1220,8 +1414,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "bear",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("bear", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1256,8 +1449,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "monkey",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("monkey", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1292,8 +1484,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1329,8 +1520,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1365,8 +1555,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1400,8 +1589,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "zebra",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("zebra", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1436,8 +1624,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "green"},
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
@@ -1473,8 +1660,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "blue"},
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
@@ -1511,8 +1697,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "yellow"},
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
@@ -1548,8 +1733,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  nil,
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1584,8 +1768,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewForbidden(schema.GroupResource{Group: "other", Resource: "minions"}, "stuff", stderrors.New("broken")),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewForbidden(schema.GroupResource{Group: "other", Resource: "minions"}, "stuff", fmt.Errorf("broken")),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1620,8 +1804,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1657,8 +1841,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1beta1.KeyUsage{
@@ -1708,8 +1892,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node: withName("panda", defaultNode()),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "orange"},
 					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
@@ -1758,8 +1941,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "pink",
@@ -1811,8 +1994,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "pink",
@@ -1864,8 +2047,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "purple",
@@ -1887,7 +2070,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR purple creation time 2000-01-01 02:32:00 +0000 UTC not in range (2000-01-01 02:32:50 +0000 UTC, 2000-01-01 04:33:00 +0000 UTC)",
+			wantErr: "CSR purple creation time 2020-11-19 00:02:00 +0000 UTC not in range (2020-11-19 00:02:50 +0000 UTC, 2020-11-19 02:03:00 +0000 UTC)",
 		},
 		{
 			name: "client good but CSR too late",
@@ -1917,8 +2100,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				nodeName: "panda",
-				nodeErr:  errors.NewNotFound(schema.GroupResource{}, ""),
+				node:    withName("panda", defaultNode()),
+				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
 				req: &certificatesv1beta1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "red",
@@ -1940,33 +2123,168 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR red creation time 2000-01-02 03:30:00 +0000 UTC not in range (2000-01-01 02:32:50 +0000 UTC, 2000-01-01 04:33:00 +0000 UTC)",
+			wantErr: "CSR red creation time 2020-11-20 01:00:00 +0000 UTC not in range (2020-11-19 00:02:50 +0000 UTC, 2020-11-19 02:03:00 +0000 UTC)",
+		},
+		{
+			name: "successfull renew flow",
+			args: args{
+				node: withName("test", defaultNode()),
+				req: &certificatesv1beta1.CertificateSigningRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "renew",
+						CreationTimestamp: creationTimestamp(10 * time.Minute),
+					},
+					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1beta1.KeyUsage{
+							certificatesv1beta1.UsageKeyEncipherment,
+							certificatesv1beta1.UsageDigitalSignature,
+							certificatesv1beta1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr: goodCSR,
+				ca:  []*x509.Certificate{parseCert(t, rootCertGood)},
+			},
+		},
+		{
+			name: "successfull fallback to fresh approval",
+			args: args{
+				node: withName("test", defaultNode()),
+				machines: []machinev1beta1.Machine{
+					{
+						Status: machinev1beta1.MachineStatus{
+							NodeRef: &corev1.ObjectReference{
+								Name: "test",
+							},
+							Addresses: []corev1.NodeAddress{
+								{
+									Type:    corev1.NodeInternalIP,
+									Address: "127.0.0.1",
+								},
+								{
+									Type:    corev1.NodeExternalIP,
+									Address: "10.0.0.1",
+								},
+								{
+									Type:    corev1.NodeInternalDNS,
+									Address: "node1.local",
+								},
+								{
+									Type:    corev1.NodeExternalDNS,
+									Address: "node1",
+								},
+							},
+						},
+					},
+				},
+				req: &certificatesv1beta1.CertificateSigningRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "renew",
+						CreationTimestamp: creationTimestamp(10 * time.Minute),
+					},
+					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1beta1.KeyUsage{
+							certificatesv1beta1.UsageKeyEncipherment,
+							certificatesv1beta1.UsageDigitalSignature,
+							certificatesv1beta1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr: goodCSR,
+				ca:  []*x509.Certificate{parseCert(t, rootCertGood)},
+			},
+		},
+		{
+			name: "successfull fallback to fresh approval from incorrect server cert",
+			args: args{
+				node: withPort(defaultPort+1, withName("test", defaultNode())),
+				req: &certificatesv1beta1.CertificateSigningRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "renew",
+						CreationTimestamp: creationTimestamp(10 * time.Minute),
+					},
+					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1beta1.KeyUsage{
+							certificatesv1beta1.UsageKeyEncipherment,
+							certificatesv1beta1.UsageDigitalSignature,
+							certificatesv1beta1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr:           goodCSR,
+				ca:            []*x509.Certificate{parseCert(t, differentCert)},
+				kubeletServer: fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort+1), differentCert, differentKey),
+			},
+			wantErr: `No target machine for node "test"`,
 		},
 	}
+
+	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
+	defer server.Close()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			kubeletServer := server
+			if tt.args.kubeletServer != nil {
+				kubeletServer = tt.args.kubeletServer
+				defer kubeletServer.Close()
+			}
+
+			nodes := &testNode{t: t, node: tt.args.node, err: tt.args.nodeErr}
 			tt.args.req.Spec.Request = []byte(tt.args.csr)
 			parsedCSR, err := parseCSR(tt.args.req)
 			if err != nil {
 				t.Fatal(err)
 			}
-			nodes := &testNode{t: t, name: tt.args.nodeName, err: tt.args.nodeErr}
 
-			if err := authorizeCSR(tt.args.config, tt.args.machines, nodes, tt.args.req, parsedCSR, tt.args.ca); errString(err) != tt.wantErr {
+			var ca *x509.CertPool
+			if len(tt.args.ca) > 0 {
+				// Start renewal flow
+				ca = x509.NewCertPool()
+				for _, cert := range tt.args.ca {
+					ca.AddCert(cert)
+				}
+				go respond(kubeletServer)
+			}
+			if err := authorizeCSR(tt.args.config, tt.args.machines, nodes, tt.args.req, parsedCSR, ca); errString(err) != tt.wantErr {
 				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, tt.wantErr)
+			}
+		})
+
+		t.Run("Invalid call", func(t *testing.T) {
+			if err := authorizeCSR(tt.args.config, tt.args.machines, nil, nil, nil, nil); errString(err) != "Invalid request" {
+				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, "Invalid request")
 			}
 		})
 	}
 }
 
 func TestAuthorizeServingRenewal(t *testing.T) {
-	// TODO(bison): Need actual coverage here.
+	presetTimeCorrect := time.Date(2020, 11, 19, 0, 0, 0, 0, time.UTC)
+	presetTimeExpired := time.Date(2020, 11, 18, 0, 0, 0, 0, time.UTC)
+
 	tests := []struct {
 		name        string
 		nodeName    string
 		csr         *x509.CertificateRequest
 		currentCert *x509.Certificate
-		ca          *x509.CertPool
+		ca          []*x509.Certificate
+		time        time.Time
 		wantErr     string
 	}{
 		{
@@ -1974,19 +2292,248 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 			nodeName: "panda",
 			wantErr:  "CSR, serving cert, or CA not provided",
 		},
+		{
+			name:        "all good",
+			nodeName:    "test",
+			csr:         parseCR(t, goodCSR),
+			currentCert: parseCert(t, serverCertGood),
+			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
+			time:        presetTimeCorrect,
+		},
+		{
+			name:        "reject expired",
+			nodeName:    "test",
+			csr:         parseCR(t, goodCSR),
+			currentCert: parseCert(t, serverCertGood),
+			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
+			time:        presetTimeExpired,
+			wantErr:     "x509: certificate has expired or is not yet valid: current time 2020-11-18T00:00:00Z is before 2020-11-18T20:12:00Z",
+		},
+		{
+			name:        "SAN list differs",
+			nodeName:    "test",
+			csr:         parseCR(t, extraAddr),
+			currentCert: parseCert(t, serverCertGood),
+			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
+			time:        presetTimeCorrect,
+			wantErr:     "CSR Subject Alternate Name values do not match current certificate",
+		},
+		{
+			name:        "No certificate match",
+			nodeName:    "test",
+			csr:         parseCR(t, goodCSR),
+			currentCert: parseCert(t, serverCertGood),
+			ca:          []*x509.Certificate{},
+			time:        presetTimeCorrect,
+			wantErr:     "x509: certificate signed by unknown authority",
+		},
+		{
+			name:        "Request from different node",
+			nodeName:    "test",
+			csr:         parseCR(t, otherName),
+			currentCert: parseCert(t, serverCertGood),
+			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
+			time:        presetTimeCorrect,
+			wantErr:     "current serving cert and CSR common name mismatch",
+		},
+		{
+			name:        "Unexpected CN",
+			nodeName:    "panda",
+			csr:         parseCR(t, goodCSR),
+			currentCert: parseCert(t, serverCertGood),
+			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
+			time:        presetTimeCorrect,
+			wantErr:     "current serving cert has bad common name",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			certPool := x509.NewCertPool()
+			for _, cert := range tt.ca {
+				certPool.AddCert(cert)
+			}
 			err := authorizeServingRenewal(
 				tt.nodeName,
 				tt.csr,
 				tt.currentCert,
-				tt.ca,
+				x509.VerifyOptions{Roots: certPool, CurrentTime: tt.time},
 			)
 
 			if errString(err) != tt.wantErr {
 				t.Errorf("got: %v, want: %s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGetServingCert(t *testing.T) {
+	defaultPort := int32(25535)
+	defaultAddr := "127.0.0.1"
+	defaultNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test",
+		},
+		Status: corev1.NodeStatus{
+			Addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: defaultAddr},
+			},
+			DaemonEndpoints: corev1.NodeDaemonEndpoints{
+				KubeletEndpoint: corev1.DaemonEndpoint{
+					Port: defaultPort,
+				},
+			},
+		},
+	}
+
+	wrongAddr := defaultNode.DeepCopy()
+	wrongAddr.Status.DaemonEndpoints.KubeletEndpoint.Port = int32(25544)
+
+	uninitialized := defaultNode.DeepCopy()
+	uninitialized.Status = corev1.NodeStatus{}
+
+	tests := []struct {
+		name      string
+		nodeName  string
+		node      *corev1.Node
+		rootCerts []*x509.Certificate
+		wantErr   string
+		serverErr error
+	}{
+		{
+			name:      "all good",
+			nodeName:  "test",
+			node:      defaultNode,
+			rootCerts: []*x509.Certificate{parseCert(t, rootCertGood)},
+		},
+		{
+			name:      "unknown certificate",
+			nodeName:  "test",
+			node:      defaultNode,
+			rootCerts: []*x509.Certificate{parseCert(t, differentCert)},
+			wantErr:   "x509: certificate signed by unknown authority",
+		},
+		{
+			name:      "node not found",
+			nodeName:  "test",
+			rootCerts: []*x509.Certificate{parseCert(t, rootCertGood)},
+			wantErr:   "nodes \"test\" not found",
+			serverErr: fmt.Errorf("nodes \"test\" not found"),
+		},
+		{
+			name:      "wrong address",
+			nodeName:  "test",
+			node:      wrongAddr,
+			rootCerts: []*x509.Certificate{parseCert(t, rootCertGood)},
+			wantErr:   "dial tcp 127.0.0.1:25544: connect: connection refused",
+		},
+		{
+			name:     "no pool provided",
+			nodeName: "test",
+			node:     defaultNode,
+			wantErr:  "no CA found: will not retrieve serving cert",
+		},
+		{
+			name:      "node with no addr",
+			nodeName:  "test",
+			node:      uninitialized,
+			rootCerts: []*x509.Certificate{parseCert(t, rootCertGood)},
+			wantErr:   "node test has no internal addresses",
+		},
+	}
+
+	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
+	defer server.Close()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var certPool *x509.CertPool
+			if len(tt.rootCerts) > 0 {
+				certPool = x509.NewCertPool()
+				for _, cert := range tt.rootCerts {
+					certPool.AddCert(cert)
+				}
+			}
+
+			nodes := &testNode{t: t, node: tt.node, err: tt.serverErr}
+
+			go respond(server)
+			serverCert, err := getServingCert(nodes, tt.nodeName, certPool)
+
+			if errString(err) != tt.wantErr {
+				t.Fatalf("got: %v, want: %s", err, tt.wantErr)
+			}
+			if err == nil && !serverCert.Equal(parseCert(t, serverCertGood)) {
+				t.Fatal("Expected server certificate match on success")
+			}
+		})
+	}
+}
+
+func TestRecentlyPendingCSRs(t *testing.T) {
+	approvedCSR := certificatesv1beta1.CertificateSigningRequest{
+		Status: certificatesv1beta1.CertificateSigningRequestStatus{
+			Conditions: []certificatesv1beta1.CertificateSigningRequestCondition{{
+				Type: certificatesv1beta1.CertificateApproved,
+			}},
+		},
+	}
+	pendingCSR := certificatesv1beta1.CertificateSigningRequest{}
+	pendingTime := baseTime.Add(time.Second)
+	pastApprovalTime := baseTime.Add(-maxPendingDelta)
+	preApprovalTime := baseTime.Add(10 * time.Second)
+
+	createdAt := func(time time.Time, csr certificatesv1beta1.CertificateSigningRequest) *certificatesv1beta1.CertificateSigningRequest {
+		csr.CreationTimestamp.Time = time
+		return csr.DeepCopy()
+	}
+
+	tests := []struct {
+		name          string
+		csrs          []*certificatesv1beta1.CertificateSigningRequest
+		expectPending int
+	}{
+		{
+			name:          "recently pending csr",
+			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(pendingTime, pendingCSR)},
+			expectPending: 1,
+		},
+		{
+			name:          "recently approved csr",
+			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(pendingTime, approvedCSR)},
+			expectPending: 0,
+		},
+		{
+			name:          "pending past approval time",
+			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(pastApprovalTime, pendingCSR)},
+			expectPending: 0,
+		},
+		{
+			name:          "pending before approval time",
+			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(preApprovalTime, pendingCSR)},
+			expectPending: 0,
+		},
+		{
+			name: "multiple different csrs",
+			csrs: []*certificatesv1beta1.CertificateSigningRequest{
+				createdAt(pendingTime, pendingCSR),
+				createdAt(pendingTime, pendingCSR),
+
+				createdAt(pendingTime, approvedCSR),
+				createdAt(preApprovalTime, approvedCSR),
+				createdAt(pastApprovalTime, approvedCSR),
+				createdAt(preApprovalTime, pendingCSR),
+				createdAt(pastApprovalTime, pendingCSR),
+			},
+			expectPending: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lister := fakeCSRLister{csrs: tt.csrs}
+			if pending := recentlyPendingCSRs(lister); pending != tt.expectPending {
+				t.Errorf("Expected %v pending CSRs, got: %v", tt.expectPending, pending)
 			}
 		})
 	}
@@ -2082,7 +2629,7 @@ func errString(err error) string {
 }
 
 func creationTimestamp(delta time.Duration) metav1.Time {
-	return metav1.NewTime(time.Date(2000, time.January, 1, 2, 30, 0, 0, time.UTC).Add(delta))
+	return metav1.NewTime(baseTime.Add(delta))
 }
 
 type testNode struct {
@@ -2090,16 +2637,16 @@ type testNode struct {
 
 	t *testing.T
 
-	name string
+	node *corev1.Node
 	err  error
 }
 
 func (n *testNode) Get(_ context.Context, name string, _ metav1.GetOptions) (*corev1.Node, error) {
-	if name != n.name {
-		n.t.Errorf("Get() name = %s, want %s", name, n.name)
+	if n.node != nil && name != n.node.Name {
+		n.t.Errorf("Get() name = %s, want %s", name, n.node.Name)
 	}
 
-	return nil, n.err
+	return n.node, n.err
 }
 
 func TestGetMaxPending(t *testing.T) {
@@ -2281,6 +2828,49 @@ func TestEqualIPAddresses(t *testing.T) {
 	}
 }
 
+func TestCsrSANs(t *testing.T) {
+	uri, _ := url.Parse("http://example.com")
+	cr := &x509.CertificateRequest{
+		DNSNames:       []string{"test.local", "localhost"},
+		EmailAddresses: []string{"exaple@test.com"},
+		IPAddresses:    []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")},
+		URIs:           []*url.URL{uri},
+	}
+
+	sans := sets.NewString(csrSANs(cr)...)
+	if !sans.HasAll(
+		"http://example.com", "test.local",
+		"localhost", "exaple@test.com",
+		"127.0.0.1", "10.0.0.1") {
+		t.Errorf("Not all SANs were collected")
+	}
+
+	if len(csrSANs(nil)) > 0 {
+		t.Errorf("No SANs are expected from nil")
+	}
+}
+
+func TestCertSANs(t *testing.T) {
+	uri, _ := url.Parse("http://example.com")
+	cert := &x509.Certificate{
+		DNSNames:       []string{"test.local", "localhost"},
+		EmailAddresses: []string{"exaple@test.com"},
+		IPAddresses:    []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")},
+		URIs:           []*url.URL{uri},
+	}
+
+	sans := sets.NewString(certSANs(cert)...)
+	if !sans.HasAll(
+		"http://example.com", "test.local",
+		"localhost", "exaple@test.com",
+		"127.0.0.1", "10.0.0.1") {
+		t.Errorf("Not all SANs were collected")
+	}
+
+	if len(certSANs(nil)) > 0 {
+		t.Errorf("No SANs are expected from nil")
+	}
+}
 func assertNoChange(t *testing.T, a, b []string, f func(*testing.T)) {
 	aCopy := make([]string, len(a))
 	bCopy := make([]string, len(b))
@@ -2294,5 +2884,50 @@ func assertNoChange(t *testing.T, a, b []string, f func(*testing.T)) {
 		t.Errorf("slice modified unexpectedly: "+
 			"orinigal a = %v, original b = %v, "+
 			"new a = %v, new b = %v", aCopy, bCopy, a, b)
+	}
+}
+
+func parseCert(t *testing.T, cert string) *x509.Certificate {
+	block, _ := pem.Decode([]byte(cert))
+	parsedCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("Passed invalid Certificate: %v ", err)
+	}
+	return parsedCert
+}
+
+func parseCR(t *testing.T, csr string) *x509.CertificateRequest {
+	block, _ := pem.Decode([]byte(csr))
+	parsedCR, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		t.Fatalf("Passed invalid Certificate: %v ", err)
+	}
+	return parsedCR
+}
+
+func fakeResponder(t *testing.T, laddr, cert, key string) (server net.Listener) {
+	crt, err := tls.X509KeyPair([]byte(cert), []byte(key))
+	if err != nil {
+		t.Fatalf("Fail to parse key pair: %s", err.Error())
+	}
+
+	server, err = tls.Listen("tcp", laddr, &tls.Config{
+		GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) { return &crt, nil },
+	})
+	if err != nil {
+		t.Fatalf("Fail to establish TCP listener: %s", err.Error())
+	}
+
+	return
+}
+
+func respond(server net.Listener) {
+	conn, err := server.Accept()
+	if err != nil {
+		return
+	}
+	if conn != nil {
+		defer conn.Close()
+		conn.Write([]byte(server.Addr().String()))
 	}
 }

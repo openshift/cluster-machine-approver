@@ -20,7 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
 
@@ -44,7 +43,13 @@ var nodeBootstrapperGroups = sets.NewString(
 	"system:authenticated",
 )
 
+var now = time.Now
+
 var maxPendingCSRs uint32
+
+type csrLister interface {
+	List() []interface{}
+}
 
 func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
@@ -75,14 +80,9 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 		return "", fmt.Errorf("Too few usages")
 	}
 
-	usages := make([]string, 0)
+	usages := make([]string, 3)
 	for i := range req.Spec.Usages {
-		usages = append(usages, string(req.Spec.Usages[i]))
-	}
-
-	// No extra usages!
-	if len(usages) != 3 {
-		return "", fmt.Errorf("Unexpected usages: %d", len(usages))
+		usages[i] = string(req.Spec.Usages[i])
 	}
 
 	usageSet := sets.NewString(usages...)
@@ -162,7 +162,7 @@ func authorizeCSR(
 		if err == nil && servingCert != nil {
 			klog.Infof("Found existing serving cert for %s", nodeAsking)
 
-			err := authorizeServingRenewal(nodeAsking, csr, servingCert, ca)
+			err := authorizeServingRenewal(nodeAsking, csr, servingCert, x509.VerifyOptions{Roots: ca})
 
 			// No error, the renewal is authorized.
 			if err == nil {
@@ -290,14 +290,15 @@ func authorizeNodeClientCSR(config ClusterMachineApproverConfig, machines []v1be
 // The current certificate must be signed by the current CA and not expired.
 // The common name on the current certificate must match the expected value.
 // All Subject Alternate Name values must match between CSR and current cert.
-func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, ca *x509.CertPool) error {
-	if csr == nil || currentCert == nil || ca == nil {
+func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, options x509.VerifyOptions) error {
+	// options.Roots should contain root certificates
+	if csr == nil || currentCert == nil || options.Roots == nil {
 		return fmt.Errorf("CSR, serving cert, or CA not provided")
 	}
 
 	// Check that the serving cert is signed by the given CA, is not expired,
 	// and is otherwise valid.
-	if _, err := currentCert.Verify(x509.VerifyOptions{Roots: ca}); err != nil {
+	if _, err := currentCert.Verify(options); err != nil {
 		return err
 	}
 
@@ -361,15 +362,15 @@ func isApproved(csr *certificatesv1beta1.CertificateSigningRequest) bool {
 	return false
 }
 
-func recentlyPendingCSRs(indexer cache.Indexer) int {
+func recentlyPendingCSRs(lister csrLister) int {
 	// assumes we are scheduled on the master meaning our clock is the same
-	now := time.Now()
-	start := now.Add(-maxPendingDelta)
-	end := now.Add(maxMachineClockSkew)
+	currentTime := now()
+	start := currentTime.Add(-maxPendingDelta)
+	end := currentTime.Add(maxMachineClockSkew)
 
 	var pending int
 
-	for _, item := range indexer.List() {
+	for _, item := range lister.List() {
 		csr := item.(*certificatesv1beta1.CertificateSigningRequest)
 
 		// ignore "old" CSRs
