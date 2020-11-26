@@ -6,6 +6,7 @@ metadata:
   name: machine-approver-sa
   annotations:
     include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -15,6 +16,7 @@ metadata:
   namespace: openshift-config-managed
   annotations:
     include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
 rules:
 - apiGroups:
   - ""
@@ -33,6 +35,7 @@ metadata:
   namespace: openshift-config-managed
   annotations:
     include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -49,6 +52,7 @@ metadata:
   name: system:openshift:controller:machine-approver
   annotations:
     include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
 rules:
 - apiGroups:
   - certificates.k8s.io
@@ -124,6 +128,7 @@ metadata:
   name: system:openshift:controller:machine-approver
   annotations:
     include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
