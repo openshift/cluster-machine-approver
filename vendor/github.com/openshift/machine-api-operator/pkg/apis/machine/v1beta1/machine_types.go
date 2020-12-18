@@ -40,7 +40,6 @@ const (
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-/// [Machine]
 // Machine is the Schema for the machines API
 // +k8s:openapi-gen=true
 // +kubebuilder:subresource:status
@@ -60,16 +59,13 @@ type Machine struct {
 	Status MachineStatus `json:"status,omitempty"`
 }
 
-/// [Machine]
-
-/// [MachineSpec]
 // MachineSpec defines the desired state of Machine
 type MachineSpec struct {
 	// ObjectMeta will autopopulate the Node created. Use this to
 	// indicate what labels, annotations, name prefix, etc., should be used
 	// when creating the Node.
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	ObjectMeta `json:"metadata,omitempty"`
 
 	// The list of the taints to be applied to the corresponding Node in additive
 	// manner. This list will not overwrite any other taints added to the Node on
@@ -98,9 +94,6 @@ type MachineSpec struct {
 	ProviderID *string `json:"providerID,omitempty"`
 }
 
-/// [MachineSpec]
-
-/// [MachineStatus]
 // MachineStatus defines the observed state of Machine
 type MachineStatus struct {
 	// NodeRef will point to the corresponding Node if it exists.
@@ -154,6 +147,7 @@ type MachineStatus struct {
 	// own versioned API types that should be
 	// serialized/deserialized from this field.
 	// +optional
+	// +kubebuilder:validation:XPreserveUnknownFields
 	ProviderStatus *runtime.RawExtension `json:"providerStatus,omitempty"`
 
 	// Addresses is a list of addresses assigned to the machine. Queried from cloud provider, if available.
@@ -189,8 +183,6 @@ type LastOperation struct {
 	// E.g. Create, Delete, Update etc
 	Type *string `json:"type,omitempty"`
 }
-
-/// [MachineVersionInfo]
 
 func (m *Machine) Validate() field.ErrorList {
 	errors := field.ErrorList{}

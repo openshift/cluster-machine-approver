@@ -2,6 +2,10 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: imagepruners.imageregistry.operator.openshift.io
+  annotations:
+    include.release.openshift.io/ibm-cloud-managed: "true"
+    include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
 spec:
   group: imageregistry.operator.openshift.io
   scope: Cluster
@@ -662,6 +666,12 @@ spec:
                   Defaults to \"Normal\"."
                 type: string
                 default: Normal
+                enum:
+                - ""
+                - Normal
+                - Debug
+                - Trace
+                - TraceAll
               nodeSelector:
                 description: nodeSelector defines the node selection constraints for
                   the image pruner pod.
