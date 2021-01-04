@@ -263,12 +263,14 @@ func main() {
 		cliConfig  string
 	)
 
-	klog.InitFlags(nil)
+	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
-	flag.StringVar(&master, "master", "", "master url")
-	flag.StringVar(&cliConfig, "config", "", "CLI config")
-	flag.Parse()
+	klog.InitFlags(flagSet)
+
+	flagSet.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
+	flagSet.StringVar(&master, "master", "", "master url")
+	flagSet.StringVar(&cliConfig, "config", "", "CLI config")
+	flagSet.Parse(os.Args[1:])
 
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
