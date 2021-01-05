@@ -3,20 +3,19 @@ module github.com/openshift/cluster-machine-approver
 go 1.15
 
 require (
-	github.com/onsi/ginkgo v1.14.1
-	github.com/onsi/gomega v1.10.2
-	github.com/openshift/api v0.0.0-20201216151826-78a19e96f9eb
-	github.com/openshift/client-go v0.0.0-20201214125552-e615e336eb49
-	github.com/openshift/library-go v0.0.0-20201215165635-4ee79b1caed5
-	github.com/openshift/machine-api-operator v0.2.1-0.20201216110516-d9e48bb9fc0b
+	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/onsi/ginkgo v1.15.0
+	github.com/onsi/gomega v1.10.5
+	github.com/openshift/api v0.0.0-20210211120836-503a3dbce2c8
+	github.com/openshift/client-go v0.0.0-20210112165513-ebc401615f47
+	github.com/openshift/cluster-api v0.0.0-20191129101638-b09907ac6668
+	github.com/openshift/library-go v0.0.0-20210205203934-9eb0d970f2f4
 	github.com/prometheus/client_golang v1.7.1
-	k8s.io/api v0.20.0
-	k8s.io/apimachinery v0.20.0
-	k8s.io/client-go v0.20.0
-	k8s.io/klog/v2 v2.4.0
-	sigs.k8s.io/controller-runtime v0.7.0
+	k8s.io/api v0.20.2
+	k8s.io/apimachinery v0.20.2
+	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
+	k8s.io/klog/v2 v2.5.0
+	sigs.k8s.io/controller-runtime v0.8.2
 )
 
-replace sigs.k8s.io/cluster-api-provider-aws => github.com/openshift/cluster-api-provider-aws v0.2.1-0.20201216171336-0b00fb8d96ac
-
-replace sigs.k8s.io/cluster-api-provider-azure => github.com/openshift/cluster-api-provider-azure v0.1.0-alpha.3.0.20201209184807-075372e2ed03
+replace k8s.io/client-go => k8s.io/client-go v0.20.0
