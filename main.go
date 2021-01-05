@@ -19,83 +19,28 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"strconv"
-
-	"github.com/openshift/cluster-machine-approver/pkg/metrics"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 
 	configv1 "github.com/openshift/api/config/v1"
 	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
+	"github.com/openshift/cluster-machine-approver/pkg/metrics"
 	control "sigs.k8s.io/controller-runtime"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-)
 
-const (
-	configNamespace     = "openshift-config-managed"
-	kubeletCAConfigMap  = "csr-controller-ca"
-	machineAPINamespace = "openshift-machine-api"
+	"k8s.io/klog/v2"
 )
 
 func main() {
-	var (
-		kubeconfig string
-		master     string
-		cliConfig  string
-	)
+	var cliConfig string
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
 	klog.InitFlags(flagSet)
-
-	flagSet.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
-	flagSet.StringVar(&master, "master", "", "master url")
 	flagSet.StringVar(&cliConfig, "config", "", "CLI config")
 	flagSet.Parse(os.Args[1:])
-
-	// creates the connection
-	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
-	if err != nil {
-		klog.Fatal(err)
-	}
-
-	// creates the clientset
-	client, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		klog.Fatal(err)
-	}
-
-	// create the csr watcher
-	csrListWatcher := cache.NewListWatchFromClient(client.CertificatesV1beta1().RESTClient(), "certificatesigningrequests", v1.NamespaceAll, fields.Everything())
-
-	// create the workqueue
-	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-
-	// Bind the workqueue to a cache with the help of an informer. This way we make sure that
-	// whenever the cache is updated, the csr key is added to the workqueue.
-	// Note that when we finally process the item from the workqueue, we might see a newer version
-	// of the CSR than the version which was responsible for triggering the update.
-	indexer, informer := cache.NewIndexerInformer(csrListWatcher, &certificatesv1beta1.CertificateSigningRequest{}, 0, cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(obj)
-			if err == nil {
-				queue.Add(key)
-			}
-		},
-	}, cache.Indexers{})
 
 	// Now let's start the controller
 	stop := make(chan struct{})
@@ -140,7 +85,7 @@ func main() {
 		klog.Fatalf("unable to create CSR controller: %v", err)
 	}
 
-	statusController := NewStatusController(config)
+	statusController := NewStatusController(mgr.GetConfig())
 	go statusController.Run(1, stop)
 	statusController.versionGetter.SetVersion(operatorVersionKey, getReleaseVersion())
 
