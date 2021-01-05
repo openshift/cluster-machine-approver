@@ -1,4 +1,4 @@
-package main
+package controller
 
 import (
 	"context"
@@ -13,14 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
-	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
+	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
+	certificatesv1 "k8s.io/api/certificates/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -45,13 +44,10 @@ var nodeBootstrapperGroups = sets.NewString(
 
 var now = time.Now
 
-var maxPendingCSRs uint32
+var MaxPendingCSRs uint32
+var PendingCSRs uint32
 
-type csrLister interface {
-	List() []interface{}
-}
-
-func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
+func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
 		return "", fmt.Errorf("%q doesn't match expected prefix: %q", req.Spec.Username, nodeUserPrefix)
 	}
@@ -87,9 +83,9 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 
 	usageSet := sets.NewString(usages...)
 	if !usageSet.HasAll(
-		string(certificatesv1beta1.UsageDigitalSignature),
-		string(certificatesv1beta1.UsageKeyEncipherment),
-		string(certificatesv1beta1.UsageServerAuth),
+		string(certificatesv1.UsageDigitalSignature),
+		string(certificatesv1.UsageKeyEncipherment),
+		string(certificatesv1.UsageServerAuth),
 	) {
 		return "", fmt.Errorf("%q is missing usages", usageSet)
 	}
@@ -129,10 +125,10 @@ func validateCSRContents(req *certificatesv1beta1.CertificateSigningRequest, csr
 // For server certificates:
 // Names contained in the CSR are checked against addresses in the corresponding node's machine status.
 func authorizeCSR(
+	c client.Client,
 	config ClusterMachineApproverConfig,
-	machines []v1beta1.Machine,
-	nodes corev1client.NodeInterface,
-	req *certificatesv1beta1.CertificateSigningRequest,
+	machines []machinev1.Machine,
+	req *certificatesv1.CertificateSigningRequest,
 	csr *x509.CertificateRequest,
 	ca *x509.CertPool,
 ) error {
@@ -141,7 +137,7 @@ func authorizeCSR(
 	}
 
 	if isNodeClientCert(req, csr) {
-		return authorizeNodeClientCSR(config, machines, nodes, req, csr)
+		return authorizeNodeClientCSR(c, config, machines, req, csr)
 	}
 
 	// node serving cert validation after this point
@@ -158,7 +154,7 @@ func authorizeCSR(
 	//
 	// This is only supported if we were given a CA to verify against.
 	if ca != nil {
-		servingCert, err := getServingCert(nodes, nodeAsking, ca)
+		servingCert, err := getServingCert(c, nodeAsking, ca)
 		if err == nil && servingCert != nil {
 			klog.Infof("Found existing serving cert for %s", nodeAsking)
 
@@ -242,7 +238,7 @@ func authorizeCSR(
 	return nil
 }
 
-func authorizeNodeClientCSR(config ClusterMachineApproverConfig, machines []v1beta1.Machine, nodes corev1client.NodeInterface, req *certificatesv1beta1.CertificateSigningRequest, csr *x509.CertificateRequest) error {
+func authorizeNodeClientCSR(c client.Client, config ClusterMachineApproverConfig, machines []machinev1.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) error {
 	if config.NodeClientCert.Disabled {
 		return fmt.Errorf("CSR %s for node client cert rejected as the flow is disabled", req.Name)
 	}
@@ -256,14 +252,8 @@ func authorizeNodeClientCSR(config ClusterMachineApproverConfig, machines []v1be
 		return fmt.Errorf("CSR %s has empty node name", req.Name)
 	}
 
-	_, err := nodes.Get(context.Background(), nodeName, metav1.GetOptions{})
-	switch {
-	case err == nil:
-		return fmt.Errorf("node %s already exists", nodeName)
-	case errors.IsNotFound(err):
-		// good, node does not exist
-	default:
-		return fmt.Errorf("failed to check if node %s already exists: %v", nodeName, err)
+	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, &corev1.Node{}); !apierrors.IsNotFound(err) {
+		return fmt.Errorf("node %s already exists or other error: %v", nodeName, err)
 	}
 
 	nodeMachine, ok := findMatchingMachineFromInternalDNS(nodeName, machines)
@@ -325,20 +315,20 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 	return nil
 }
 
-func isReqFromNodeBootstrapper(req *certificatesv1beta1.CertificateSigningRequest) bool {
+func isReqFromNodeBootstrapper(req *certificatesv1.CertificateSigningRequest) bool {
 	return req.Spec.Username == nodeBootstrapperUsername && nodeBootstrapperGroups.Equal(sets.NewString(req.Spec.Groups...))
 }
 
-func findMatchingMachineFromNodeRef(nodeName string, machines []v1beta1.Machine) (v1beta1.Machine, bool) {
+func findMatchingMachineFromNodeRef(nodeName string, machines []machinev1.Machine) (machinev1.Machine, bool) {
 	for _, machine := range machines {
 		if machine.Status.NodeRef != nil && machine.Status.NodeRef.Name == nodeName {
 			return machine, true
 		}
 	}
-	return v1beta1.Machine{}, false
+	return machinev1.Machine{}, false
 }
 
-func findMatchingMachineFromInternalDNS(nodeName string, machines []v1beta1.Machine) (v1beta1.Machine, bool) {
+func findMatchingMachineFromInternalDNS(nodeName string, machines []machinev1.Machine) (machinev1.Machine, bool) {
 	for _, machine := range machines {
 		for _, address := range machine.Status.Addresses {
 			if address.Type == corev1.NodeInternalDNS && address.Address == nodeName {
@@ -346,23 +336,23 @@ func findMatchingMachineFromInternalDNS(nodeName string, machines []v1beta1.Mach
 			}
 		}
 	}
-	return v1beta1.Machine{}, false
+	return machinev1.Machine{}, false
 }
 
 func inTimeSpan(start, end, check time.Time) bool {
 	return check.After(start) && check.Before(end)
 }
 
-func isApproved(csr *certificatesv1beta1.CertificateSigningRequest) bool {
+func isApproved(csr certificatesv1.CertificateSigningRequest) bool {
 	for _, condition := range csr.Status.Conditions {
-		if condition.Type == certificatesv1beta1.CertificateApproved {
+		if condition.Type == certificatesv1.CertificateApproved {
 			return true
 		}
 	}
 	return false
 }
 
-func recentlyPendingCSRs(lister csrLister) int {
+func recentlyPendingCSRs(csrs []certificatesv1.CertificateSigningRequest) int {
 	// assumes we are scheduled on the master meaning our clock is the same
 	currentTime := now()
 	start := currentTime.Add(-maxPendingDelta)
@@ -370,9 +360,7 @@ func recentlyPendingCSRs(lister csrLister) int {
 
 	var pending int
 
-	for _, item := range lister.List() {
-		csr := item.(*certificatesv1beta1.CertificateSigningRequest)
-
+	for _, csr := range csrs {
 		// ignore "old" CSRs
 		if !inTimeSpan(start, end, csr.CreationTimestamp.Time) {
 			continue
@@ -392,13 +380,13 @@ func recentlyPendingCSRs(lister csrLister) int {
 // If successful, and the returned TLS certificate is validated against the
 // given CA, the node's serving certificate as presented over the established
 // connection is returned.
-func getServingCert(nodes corev1client.NodeInterface, nodeName string, ca *x509.CertPool) (*x509.Certificate, error) {
+func getServingCert(c client.Client, nodeName string, ca *x509.CertPool) (*x509.Certificate, error) {
 	if ca == nil {
 		return nil, fmt.Errorf("no CA found: will not retrieve serving cert")
 	}
 
-	node, err := nodes.Get(context.Background(), nodeName, metav1.GetOptions{})
-	if err != nil {
+	node := &corev1.Node{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, node); err != nil {
 		return nil, err
 	}
 

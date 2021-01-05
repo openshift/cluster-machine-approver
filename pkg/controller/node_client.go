@@ -1,21 +1,21 @@
-package main
+package controller
 
 import (
 	"crypto/x509"
 	"reflect"
 	"strings"
 
-	capi "k8s.io/api/certificates/v1beta1"
+	certificatesv1 "k8s.io/api/certificates/v1beta1"
 )
 
 // copied from k8s.io/kubernetes/pkg/controller/certificates/approver/sarapprove.go
 
-func hasExactUsages(csr *capi.CertificateSigningRequest, usages []capi.KeyUsage) bool {
+func hasExactUsages(csr *certificatesv1.CertificateSigningRequest, usages []certificatesv1.KeyUsage) bool {
 	if len(usages) != len(csr.Spec.Usages) {
 		return false
 	}
 
-	usageMap := map[capi.KeyUsage]struct{}{}
+	usageMap := map[certificatesv1.KeyUsage]struct{}{}
 	for _, u := range usages {
 		usageMap[u] = struct{}{}
 	}
@@ -29,13 +29,13 @@ func hasExactUsages(csr *capi.CertificateSigningRequest, usages []capi.KeyUsage)
 	return true
 }
 
-var kubeletClientUsages = []capi.KeyUsage{
-	capi.UsageKeyEncipherment,
-	capi.UsageDigitalSignature,
-	capi.UsageClientAuth,
+var kubeletClientUsages = []certificatesv1.KeyUsage{
+	certificatesv1.UsageKeyEncipherment,
+	certificatesv1.UsageDigitalSignature,
+	certificatesv1.UsageClientAuth,
 }
 
-func isNodeClientCert(csr *capi.CertificateSigningRequest, x509cr *x509.CertificateRequest) bool {
+func isNodeClientCert(csr *certificatesv1.CertificateSigningRequest, x509cr *x509.CertificateRequest) bool {
 	if !reflect.DeepEqual([]string{"system:nodes"}, x509cr.Subject.Organization) {
 		return false
 	}

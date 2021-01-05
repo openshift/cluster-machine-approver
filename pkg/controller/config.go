@@ -1,4 +1,4 @@
-package main
+package controller
 
 import (
 	"encoding/json"
@@ -17,7 +17,7 @@ type NodeClientCert struct {
 	Disabled bool `json:"disabled,omitempty"`
 }
 
-func loadConfig(cliConfig string) ClusterMachineApproverConfig {
+func LoadConfig(cliConfig string) ClusterMachineApproverConfig {
 	config := ClusterMachineApproverConfig{}
 	defer func() {
 		klog.Infof("machine approver config: %+v", config)

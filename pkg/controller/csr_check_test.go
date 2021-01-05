@@ -1,7 +1,6 @@
-package main
+package controller
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -12,16 +11,15 @@ import (
 	"testing"
 	"time"
 
-	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
+	certificatesv1 "k8s.io/api/certificates/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/sets"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	machinev1beta1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
+	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 )
 
 /*
@@ -171,6 +169,18 @@ yOf1lhGA26sAJX4gMeTHUxPu85NedLzTg5DYDyPPvIYPKw7ww8tm2fYb67sr21WU
 p1VlUzB7qtkVJ4coGNFPwl7vu3rps5VPN7ONV9JG8+PVvjxhyQD5ZBqLVPbT7ZGI
 NKbWRRtEF/XLPoZs3kq95YCgn2oQ9ws=
 -----END CERTIFICATE REQUEST-----
+`
+	emptyCSR = `
+Certificate Request:
+    Data:
+        Version: 1 (0x0)
+        Subject: O = system:nodes, CN = system:node:test
+...
+        Requested Extensions:
+            X509v3 Subject Alternative Name:
+                DNS:node1, DNS:node1.local, IP Address:10.0.0.1, IP Address:127.0.0.1
+...
+-----BEGIN??
 `
 	extraAddr = `
 Certificate Request:
@@ -406,18 +416,6 @@ rj/Dkdwyag==
 `
 )
 
-type fakeCSRLister struct {
-	csrs []*certificatesv1beta1.CertificateSigningRequest
-}
-
-func (f fakeCSRLister) List() []interface{} {
-	objects := make([]interface{}, len(f.csrs))
-	for i, csr := range f.csrs {
-		objects[i] = csr
-	}
-	return objects
-}
-
 var baseTime = time.Date(2020, 11, 19, 0, 0, 0, 0, time.UTC)
 
 func init() {
@@ -453,11 +451,10 @@ func Test_authorizeCSR(t *testing.T) {
 
 	type args struct {
 		config        ClusterMachineApproverConfig
-		machines      []machinev1beta1.Machine
+		machines      []machinev1.Machine
 		node          *corev1.Node
-		nodeErr       error
 		kubeletServer net.Listener
-		req           *certificatesv1beta1.CertificateSigningRequest
+		req           *certificatesv1.CertificateSigningRequest
 		csr           string
 		ca            []*x509.Certificate
 	}
@@ -469,9 +466,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "ok",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -496,12 +493,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -515,11 +512,19 @@ func Test_authorizeCSR(t *testing.T) {
 			wantErr: "",
 		},
 		{
+			name: "bad-csr",
+			args: args{
+				csr: emptyCSR,
+				req: &certificatesv1.CertificateSigningRequest{},
+			},
+			wantErr: "PEM block type must be CERTIFICATE REQUEST",
+		},
+		{
 			name: "no-node-prefix",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -544,12 +549,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "test",
 						Groups: []string{
@@ -565,9 +570,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "only-node-prefix",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -592,12 +597,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:",
 						Groups: []string{
@@ -613,17 +618,17 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "no-machine-status-ref",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{},
+						Status: machinev1.MachineStatus{},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -639,9 +644,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "missing-groups-1",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -666,12 +671,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -686,9 +691,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "missing-groups-2",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -713,12 +718,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -733,9 +738,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "extra-group",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -760,12 +765,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -782,9 +787,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "wrong-group",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -809,12 +814,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -830,9 +835,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usages-missing",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -857,11 +862,11 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -876,9 +881,9 @@ func Test_authorizeCSR(t *testing.T) {
 		}, {
 			name: "usages-missing",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -903,12 +908,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -924,9 +929,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usages-missing-1",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -951,11 +956,11 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -971,9 +976,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usage-missing-2",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -998,11 +1003,11 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1018,9 +1023,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usage-extra",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1045,13 +1050,13 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
-							certificatesv1beta1.UsageSigning,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+							certificatesv1.UsageSigning,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1067,9 +1072,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-cn",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1094,12 +1099,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1115,9 +1120,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-cn-2",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1142,12 +1147,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1163,9 +1168,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-no-o",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1190,12 +1195,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1211,9 +1216,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-extra-addr",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1238,12 +1243,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1259,9 +1264,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-san-ip-mismatch",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1286,12 +1291,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1307,9 +1312,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-san-dns-mismatch",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1334,12 +1339,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -1356,9 +1361,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1368,7 +1373,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1378,14 +1383,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1402,9 +1405,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client extra O",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1415,12 +1418,12 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("bear", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1437,9 +1440,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client with DNS",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1450,12 +1453,12 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("monkey", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1472,9 +1475,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but extra usage",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1485,13 +1488,13 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1508,9 +1511,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong usage",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1521,12 +1524,12 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageServerAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1543,9 +1546,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but missing usage",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1556,11 +1559,11 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1577,9 +1580,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong CN",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1590,12 +1593,12 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("zebra", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1612,9 +1615,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong user",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1625,13 +1628,13 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "green"},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper-not",
 						Groups: []string{
@@ -1648,9 +1651,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong user group",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1661,13 +1664,13 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "blue"},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1685,9 +1688,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but empty name",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1698,13 +1701,13 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "yellow"},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1721,9 +1724,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but node exists",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1734,12 +1737,12 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1751,50 +1754,14 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "node panda already exists",
-		},
-		{
-			name: "client good but node unexpected error",
-			args: args{
-				machines: []machinev1beta1.Machine{
-					{
-						Status: machinev1beta1.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
-				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewForbidden(schema.GroupResource{Group: "other", Resource: "minions"}, "stuff", fmt.Errorf("broken")),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
-						},
-						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
-						Groups: []string{
-							"system:authenticated",
-							"system:serviceaccounts:openshift-machine-config-operator",
-							"system:serviceaccounts",
-						},
-					},
-				},
-				csr: clientGood,
-			},
-			wantErr: `failed to check if node panda already exists: minions.other "stuff" is forbidden: broken`,
+			wantErr: "node panda already exists or other error: <nil>",
 		},
 		{
 			name: "client good but missing machine",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeExternalDNS,
@@ -1804,14 +1771,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1828,9 +1793,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but machine has node ref",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{Name: "other"},
 							Addresses: []corev1.NodeAddress{
 								{
@@ -1841,14 +1806,12 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
-				req: &certificatesv1beta1.CertificateSigningRequest{
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1870,9 +1833,9 @@ func Test_authorizeCSR(t *testing.T) {
 						Disabled: true,
 					},
 				},
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1882,7 +1845,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1893,13 +1856,13 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				node: withName("panda", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{Name: "orange"},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1916,9 +1879,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good with proper timing",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1931,7 +1894,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(2 * time.Minute),
 						},
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1941,18 +1904,16 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "pink",
 						CreationTimestamp: creationTimestamp(10 * time.Minute),
 					},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -1969,9 +1930,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good with proper timing 2",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1984,7 +1945,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
 						},
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1994,18 +1955,16 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "pink",
 						CreationTimestamp: creationTimestamp(2*time.Minute + 51*time.Second),
 					},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -2022,9 +1981,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but CSR too early",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2037,7 +1996,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
 						},
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2047,18 +2006,16 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "purple",
 						CreationTimestamp: creationTimestamp(2 * time.Minute),
 					},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -2075,9 +2032,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but CSR too late",
 			args: args{
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2090,7 +2047,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
 						},
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2100,18 +2057,16 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node:    withName("panda", defaultNode()),
-				nodeErr: errors.NewNotFound(schema.GroupResource{}, ""),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "red",
 						CreationTimestamp: creationTimestamp(25 * time.Hour),
 					},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageClientAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
 						},
 						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
 						Groups: []string{
@@ -2129,16 +2084,16 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "successfull renew flow",
 			args: args{
 				node: withName("test", defaultNode()),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "renew",
 						CreationTimestamp: creationTimestamp(10 * time.Minute),
 					},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageServerAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -2154,10 +2109,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "successfull fallback to fresh approval",
 			args: args{
-				node: withName("test", defaultNode()),
-				machines: []machinev1beta1.Machine{
+				machines: []machinev1.Machine{
 					{
-						Status: machinev1beta1.MachineStatus{
+						Status: machinev1.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -2182,16 +2136,16 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "renew",
 						CreationTimestamp: creationTimestamp(10 * time.Minute),
 					},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageServerAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -2208,16 +2162,16 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "successfull fallback to fresh approval from incorrect server cert",
 			args: args{
 				node: withPort(defaultPort+1, withName("test", defaultNode())),
-				req: &certificatesv1beta1.CertificateSigningRequest{
+				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "renew",
 						CreationTimestamp: creationTimestamp(10 * time.Minute),
 					},
-					Spec: certificatesv1beta1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1beta1.KeyUsage{
-							certificatesv1beta1.UsageKeyEncipherment,
-							certificatesv1beta1.UsageDigitalSignature,
-							certificatesv1beta1.UsageServerAuth,
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageServerAuth,
 						},
 						Username: "system:node:test",
 						Groups: []string{
@@ -2245,11 +2199,18 @@ func Test_authorizeCSR(t *testing.T) {
 				defer kubeletServer.Close()
 			}
 
-			nodes := &testNode{t: t, node: tt.args.node, err: tt.args.nodeErr}
+			nodes := []runtime.Object{}
+			if tt.args.node != nil {
+				nodes = []runtime.Object{tt.args.node}
+			}
+			cl := fake.NewFakeClient(nodes...)
 			tt.args.req.Spec.Request = []byte(tt.args.csr)
 			parsedCSR, err := parseCSR(tt.args.req)
 			if err != nil {
-				t.Fatal(err)
+				if errString(err) != tt.wantErr {
+					t.Errorf("parseCSR() error = %v, wantErr %s", err, tt.wantErr)
+				}
+				return
 			}
 
 			var ca *x509.CertPool
@@ -2261,13 +2222,13 @@ func Test_authorizeCSR(t *testing.T) {
 				}
 				go respond(kubeletServer)
 			}
-			if err := authorizeCSR(tt.args.config, tt.args.machines, nodes, tt.args.req, parsedCSR, ca); errString(err) != tt.wantErr {
+			if err := authorizeCSR(cl, tt.args.config, tt.args.machines, tt.args.req, parsedCSR, ca); errString(err) != tt.wantErr {
 				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, tt.wantErr)
 			}
 		})
 
 		t.Run("Invalid call", func(t *testing.T) {
-			if err := authorizeCSR(tt.args.config, tt.args.machines, nil, nil, nil, nil); errString(err) != "Invalid request" {
+			if err := authorizeCSR(nil, tt.args.config, tt.args.machines, nil, nil, nil); errString(err) != "Invalid request" {
 				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, "Invalid request")
 			}
 		})
@@ -2398,7 +2359,6 @@ func TestGetServingCert(t *testing.T) {
 		node      *corev1.Node
 		rootCerts []*x509.Certificate
 		wantErr   string
-		serverErr error
 	}{
 		{
 			name:      "all good",
@@ -2418,7 +2378,6 @@ func TestGetServingCert(t *testing.T) {
 			nodeName:  "test",
 			rootCerts: []*x509.Certificate{parseCert(t, rootCertGood)},
 			wantErr:   "nodes \"test\" not found",
-			serverErr: fmt.Errorf("nodes \"test\" not found"),
 		},
 		{
 			name:      "wrong address",
@@ -2455,11 +2414,14 @@ func TestGetServingCert(t *testing.T) {
 				}
 			}
 
-			nodes := &testNode{t: t, node: tt.node, err: tt.serverErr}
+			objects := []runtime.Object{}
+			if tt.node != nil {
+				objects = append(objects, tt.node)
+			}
+			cl := fake.NewFakeClient(objects...)
 
 			go respond(server)
-			serverCert, err := getServingCert(nodes, tt.nodeName, certPool)
-
+			serverCert, err := getServingCert(cl, tt.nodeName, certPool)
 			if errString(err) != tt.wantErr {
 				t.Fatalf("got: %v, want: %s", err, tt.wantErr)
 			}
@@ -2471,51 +2433,51 @@ func TestGetServingCert(t *testing.T) {
 }
 
 func TestRecentlyPendingCSRs(t *testing.T) {
-	approvedCSR := certificatesv1beta1.CertificateSigningRequest{
-		Status: certificatesv1beta1.CertificateSigningRequestStatus{
-			Conditions: []certificatesv1beta1.CertificateSigningRequestCondition{{
-				Type: certificatesv1beta1.CertificateApproved,
+	approvedCSR := certificatesv1.CertificateSigningRequest{
+		Status: certificatesv1.CertificateSigningRequestStatus{
+			Conditions: []certificatesv1.CertificateSigningRequestCondition{{
+				Type: certificatesv1.CertificateApproved,
 			}},
 		},
 	}
-	pendingCSR := certificatesv1beta1.CertificateSigningRequest{}
+	pendingCSR := certificatesv1.CertificateSigningRequest{}
 	pendingTime := baseTime.Add(time.Second)
 	pastApprovalTime := baseTime.Add(-maxPendingDelta)
 	preApprovalTime := baseTime.Add(10 * time.Second)
 
-	createdAt := func(time time.Time, csr certificatesv1beta1.CertificateSigningRequest) *certificatesv1beta1.CertificateSigningRequest {
+	createdAt := func(time time.Time, csr certificatesv1.CertificateSigningRequest) certificatesv1.CertificateSigningRequest {
 		csr.CreationTimestamp.Time = time
-		return csr.DeepCopy()
+		return csr
 	}
 
 	tests := []struct {
 		name          string
-		csrs          []*certificatesv1beta1.CertificateSigningRequest
+		csrs          []certificatesv1.CertificateSigningRequest
 		expectPending int
 	}{
 		{
 			name:          "recently pending csr",
-			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(pendingTime, pendingCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, pendingCSR)},
 			expectPending: 1,
 		},
 		{
 			name:          "recently approved csr",
-			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(pendingTime, approvedCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, approvedCSR)},
 			expectPending: 0,
 		},
 		{
 			name:          "pending past approval time",
-			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(pastApprovalTime, pendingCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pastApprovalTime, pendingCSR)},
 			expectPending: 0,
 		},
 		{
 			name:          "pending before approval time",
-			csrs:          []*certificatesv1beta1.CertificateSigningRequest{createdAt(preApprovalTime, pendingCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(preApprovalTime, pendingCSR)},
 			expectPending: 0,
 		},
 		{
 			name: "multiple different csrs",
-			csrs: []*certificatesv1beta1.CertificateSigningRequest{
+			csrs: []certificatesv1.CertificateSigningRequest{
 				createdAt(pendingTime, pendingCSR),
 				createdAt(pendingTime, pendingCSR),
 
@@ -2531,8 +2493,7 @@ func TestRecentlyPendingCSRs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lister := fakeCSRLister{csrs: tt.csrs}
-			if pending := recentlyPendingCSRs(lister); pending != tt.expectPending {
+			if pending := recentlyPendingCSRs(tt.csrs); pending != tt.expectPending {
 				t.Errorf("Expected %v pending CSRs, got: %v", tt.expectPending, pending)
 			}
 		})
@@ -2632,30 +2593,13 @@ func creationTimestamp(delta time.Duration) metav1.Time {
 	return metav1.NewTime(baseTime.Add(delta))
 }
 
-type testNode struct {
-	corev1client.NodeInterface // panic if anything other than Get is called
-
-	t *testing.T
-
-	node *corev1.Node
-	err  error
-}
-
-func (n *testNode) Get(_ context.Context, name string, _ metav1.GetOptions) (*corev1.Node, error) {
-	if n.node != nil && name != n.node.Name {
-		n.t.Errorf("Get() name = %s, want %s", name, n.node.Name)
-	}
-
-	return n.node, n.err
-}
-
 func TestGetMaxPending(t *testing.T) {
-	ml := []machinev1beta1.Machine{
+	ml := []machinev1.Machine{
 		{
-			Status: machinev1beta1.MachineStatus{},
+			Status: machinev1.MachineStatus{},
 		},
 		{
-			Status: machinev1beta1.MachineStatus{},
+			Status: machinev1.MachineStatus{},
 		},
 	}
 
