@@ -23,8 +23,10 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/openshift/cluster-machine-approver/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -43,8 +45,6 @@ import (
 )
 
 const (
-	// defaultMetricsPort is the default port to expose metrics.
-	defaultMetricsPort  = 9191
 	configNamespace     = "openshift-config-managed"
 	kubeletCAConfigMap  = "csr-controller-ca"
 	machineAPINamespace = "openshift-machine-api"
@@ -101,12 +101,19 @@ func main() {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	startMetricsCollectionAndServer(indexer)
+	metricsPort := metrics.DefaultMetricsPort
+	if port, ok := os.LookupEnv("METRICS_PORT"); ok {
+		v, err := strconv.Atoi(port)
+		if err != nil {
+			klog.Fatalf("Error parsing METRICS_PORT (%q) environment variable: %v", port, err)
+		}
+		metricsPort = fmt.Sprintf(":%d", v)
+	}
 
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
 	mgr, err := manager.New(control.GetConfigOrDie(), manager.Options{
-		MetricsBindAddress: defaultMetricsPort,
+		MetricsBindAddress: metricsPort,
 	})
 	if err != nil {
 		klog.Fatalf("unable to set up overall controller manager: %v", err)
@@ -142,31 +149,4 @@ func main() {
 	if err := mgr.Start(control.SetupSignalHandler()); err != nil {
 		klog.Fatalf("unable to run the manager: %v", err)
 	}
-}
-
-func startMetricsCollectionAndServer(indexer cache.Indexer) {
-	metricsCollector := NewMetricsCollector(indexer)
-	prometheus.MustRegister(metricsCollector)
-	metricsPort := defaultMetricsPort
-	if port, ok := os.LookupEnv("METRICS_PORT"); ok {
-		v, err := strconv.Atoi(port)
-		if err != nil {
-			klog.Fatalf("Error parsing METRICS_PORT (%q) environment variable: %v", port, err)
-		}
-		metricsPort = v
-	}
-	klog.V(4).Info("Starting server to serve prometheus metrics")
-	go startHTTPMetricServer(fmt.Sprintf("127.0.0.1:%d", metricsPort))
-}
-
-func startHTTPMetricServer(metricsPort string) {
-	mux := http.NewServeMux()
-	//TODO(vikasc): Use promhttp package for handler. This is Deprecated
-	mux.Handle("/metrics", promhttp.Handler())
-
-	server := &http.Server{
-		Addr:    metricsPort,
-		Handler: mux,
-	}
-	klog.Fatal(server.ListenAndServe())
 }

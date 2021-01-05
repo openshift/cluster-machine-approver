@@ -1,12 +1,16 @@
-package main
+package metrics
 
 import (
 	"sync/atomic"
 
+	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/prometheus/client_golang/prometheus"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
+
+// defaultMetricsPort is the default port to expose metrics.
+const DefaultMetricsPort = ":9191"
 
 var (
 	// CurrentPendingCSRCountDesc is a metric to report count of the pending csr in the cluster
@@ -15,16 +19,12 @@ var (
 	MaxPendingCSRDesc = prometheus.NewDesc("mapi_max_pending_csr", "Threshold value of the pending CSRs beyond which any new CSR requests will be ignored ", nil, nil)
 )
 
-// MetricsCollector is implementing prometheus.Collector interface.
-type MetricsCollector struct {
-	cacheIndexer cache.Indexer
+func init() {
+	metrics.Registry.MustRegister(&MetricsCollector{})
 }
 
-func NewMetricsCollector(indexer cache.Indexer) *MetricsCollector {
-	return &MetricsCollector{
-		cacheIndexer: indexer,
-	}
-}
+// MetricsCollector is implementing prometheus.Collector interface.
+type MetricsCollector struct{}
 
 // Collect is method required to implement the prometheus.Collector(prometheus/client_golang/prometheus/collector.go) interface.
 func (mc *MetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -39,8 +39,7 @@ func (mc MetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements the prometheus.Collector interface.
 func (mc MetricsCollector) collectMetrics(ch chan<- prometheus.Metric) {
-	pending := recentlyPendingCSRs(mc.cacheIndexer)
-	ch <- prometheus.MustNewConstMetric(CurrentPendingCSRCountDesc, prometheus.GaugeValue, float64(pending))
-	ch <- prometheus.MustNewConstMetric(MaxPendingCSRDesc, prometheus.GaugeValue, float64(atomic.LoadUint32(&maxPendingCSRs)))
+	ch <- prometheus.MustNewConstMetric(CurrentPendingCSRCountDesc, prometheus.GaugeValue, float64(atomic.LoadUint32(&controller.PendingCSRs)))
+	ch <- prometheus.MustNewConstMetric(MaxPendingCSRDesc, prometheus.GaugeValue, float64(atomic.LoadUint32(&controller.MaxPendingCSRs)))
 	klog.V(4).Infof("collectMetrics exit")
 }
