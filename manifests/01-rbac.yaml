@@ -91,6 +91,16 @@ rules:
   - nodes
   verbs:
   - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - watch
+  - list
 - apiGroups:
   - authentication.k8s.io
   resources:
