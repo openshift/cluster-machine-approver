@@ -14,7 +14,7 @@ test:
 .PHONY: test
 
 unit:
-	go test -v .
+	go test -v ./...
 .PHONY: unit
 
 .PHONY: goimports
