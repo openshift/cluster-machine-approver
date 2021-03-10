@@ -176,7 +176,7 @@ func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigning
 	}
 
 	if err := approve(m.RestCfg, &csr); err != nil {
-		m.addCsrAnnotation(&csr, errorAnnotationKey, fmt.Errorf("Unable to approve: %w", csr.Name, err).Error())
+		m.addCsrAnnotation(&csr, errorAnnotationKey, fmt.Errorf("Unable to approve: %v", csr.Name, err).Error())
 		return fmt.Errorf("Unable to approve CSR %s: %w", csr.Name, err)
 	}
 	klog.Infof("CSR %s approved", csr.Name)
