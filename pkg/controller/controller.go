@@ -31,6 +31,10 @@ import (
 const (
 	configNamespace    = "openshift-config-managed"
 	kubeletCAConfigMap = "csr-controller-ca"
+
+	clusterMachineApproverAnnotationKey = "cluster-machine-approver.openshift.io/"
+	rejectionAnnotationKey              = clusterMachineApproverAnnotationKey + "rejection-reason"
+	errorAnnotationKey                  = clusterMachineApproverAnnotationKey + "error"
 )
 
 // MachineApproverReconciler reconciles a machine-approver  object
@@ -153,7 +157,9 @@ func reconcileLimits(machines *machinev1.MachineList, csrs *certificatesv1.Certi
 func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigningRequest, machines *machinev1.MachineList) error {
 	parsedCSR, err := parseCSR(&csr)
 	if err != nil {
-		return fmt.Errorf("error parsing request CSR: %v", err)
+		formattedError := fmt.Errorf("error parsing request CSR: %v", err)
+		m.addCsrAnnotation(&csr, errorAnnotationKey, formattedError.Error())
+		return formattedError
 	}
 
 	kubeletCA := m.getKubeletCA()
@@ -165,10 +171,12 @@ func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigning
 
 	if err := authorizeCSR(m, m.Config, machines.Items, &csr, parsedCSR, kubeletCA); err != nil {
 		// Don't deny since it might be someone else's CSR
+		m.addCsrAnnotation(&csr, rejectionAnnotationKey, fmt.Errorf("Not authorized: %v", err).Error())
 		return fmt.Errorf("CSR %s not authorized: %v", csr.Name, err)
 	}
 
 	if err := approve(m.RestCfg, &csr); err != nil {
+		m.addCsrAnnotation(&csr, errorAnnotationKey, fmt.Errorf("Unable to approve: %w", csr.Name, err).Error())
 		return fmt.Errorf("Unable to approve CSR %s: %w", csr.Name, err)
 	}
 	klog.Infof("CSR %s approved", csr.Name)
@@ -203,6 +211,19 @@ func (m *CertificateApprover) getKubeletCA() *x509.CertPool {
 	}
 
 	return certPool
+}
+
+func (m *CertificateApprover) addCsrAnnotation(csr *certificatesv1.CertificateSigningRequest, key string, value string) error {
+	baseToPatch := client.MergeFrom(csr.DeepCopy())
+	if csr.Annotations == nil {
+		csr.Annotations = map[string]string{}
+	}
+	csr.Annotations[key] = value
+	if err := m.Client.Patch(context.Background(), csr, baseToPatch); err != nil {
+		klog.Errorf("Failed to add annotation for %s: %v", csr.Name, err)
+		return err
+	}
+	return nil
 }
 
 func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) error {
