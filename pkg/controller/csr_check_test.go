@@ -878,7 +878,8 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: goodCSR,
 			},
 			wantErr: "Too few usages",
-		}, {
+		},
+		{
 			name: "usages-missing",
 			args: args{
 				machines: []machinev1.Machine{
@@ -1357,7 +1358,6 @@ func Test_authorizeCSR(t *testing.T) {
 			},
 			wantErr: "DNS name 'node1' not in machine names: node1.local node2",
 		},
-
 		{
 			name: "client good",
 			args: args{
