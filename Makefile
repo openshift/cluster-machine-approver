@@ -5,28 +5,55 @@ export GOFLAGS
 GOPROXY ?=
 export GOPROXY
 
+
+NO_DOCKER ?= 0
+
+ifeq ($(shell command -v podman > /dev/null 2>&1 ; echo $$? ), 0)
+	ENGINE=podman
+else ifeq ($(shell command -v docker > /dev/null 2>&1 ; echo $$? ), 0)
+	ENGINE=docker
+else
+	NO_DOCKER=1
+endif
+
+USE_DOCKER ?= 0
+ifeq ($(USE_DOCKER), 1)
+	ENGINE=docker
+endif
+
+ifeq ($(NO_DOCKER), 1)
+  DOCKER_CMD =
+  IMAGE_BUILD_CMD = imagebuilder
+else
+  DOCKER_CMD := $(ENGINE) run --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --rm -v "$(PWD)":/go/src/github.com/openshift/cluster-machine-approver:Z  -w /go/src/github.com/openshift/cluster-machine-approver openshift/origin-release:golang-1.15
+  IMAGE_BUILD_CMD = $(ENGINE) build
+endif
+
 all build:
-	go build -o machine-approver .
+	$(DOCKER_CMD) go build -o machine-approver .
 .PHONY: all build
 
 test:
-	KUBEBUILDER_CONTROLPLANE_START_TIMEOUT=10m hack/ci-test.sh
+	$(DOCKER_CMD) hack/ci-test.sh
 .PHONY: test
 
 unit:
-	go test -v ./...
+	$(DOCKER_CMD) go test -v ./...
 .PHONY: unit
 
 .PHONY: goimports
 goimports: ## Go fmt your code
-	hack/goimports.sh .
+	$(DOCKER_CMD) hack/goimports.sh .
 
 images:
-	imagebuilder -f Dockerfile -t openshift/origin-cluster-machine-approver:latest .
+ifeq ($(NO_DOCKER), 1)
+	./hack/imagebuilder.sh
+endif
+	$(IMAGE_BUILD_CMD) -f Dockerfile -t openshift/origin-cluster-machine-approver:latest .
 .PHONY: images
 
 clean:
-	$(RM) ./cluster-machine-approver
+	$(DOCKER_CMD) $(RM) ./machine-approver
 .PHONY: clean
 
 test-e2e: ## Run e2e tests
@@ -35,6 +62,4 @@ test-e2e: ## Run e2e tests
 
 .PHONY: vendor
 vendor:
-	go mod tidy
-	go mod vendor
-	go mod verify
+	$(DOCKER_CMD) hack/go-mod.sh
