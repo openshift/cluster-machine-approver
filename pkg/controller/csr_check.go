@@ -151,7 +151,7 @@ func authorizeCSR(
 	// node serving cert validation after this point
 
 	nodeAsking, err := validateCSRContents(req, csr)
-	if nodeAsking == "" {
+	if nodeAsking == "" || err != nil {
 		if err != nil {
 			//TODO: set annotation/emit event here.
 			klog.Errorf("%v: Unrecoverable serving cert error, cannot approve: %v", req.Name, err)
