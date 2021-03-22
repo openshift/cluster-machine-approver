@@ -459,9 +459,10 @@ func Test_authorizeCSR(t *testing.T) {
 		ca            []*x509.Certificate
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr string
+		name      string
+		args      args
+		wantErr   string
+		authorize bool
 	}{
 		{
 			name: "ok",
@@ -509,7 +510,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "",
+			wantErr:   "",
+			authorize: true,
 		},
 		{
 			name: "bad-csr",
@@ -517,7 +519,8 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: emptyCSR,
 				req: &certificatesv1.CertificateSigningRequest{},
 			},
-			wantErr: "PEM block type must be CERTIFICATE REQUEST",
+			wantErr:   "PEM block type must be CERTIFICATE REQUEST",
+			authorize: false,
 		},
 		{
 			name: "no-node-prefix",
@@ -565,7 +568,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "\"test\" doesn't match expected prefix: \"system:node:\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "only-node-prefix",
@@ -613,7 +617,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Empty name",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "no-machine-status-ref",
@@ -639,7 +644,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "No target machine for node \"test\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "missing-groups-1",
@@ -686,7 +692,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few groups",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "missing-groups-2",
@@ -733,7 +740,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few groups",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "extra-group",
@@ -782,7 +790,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "",
+			wantErr:   "",
+			authorize: true,
 		},
 		{
 			name: "wrong-group",
@@ -830,7 +839,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "map[\"system:authenticated\":{} \"system:foo-bar\":{}] not in \"system:authenticated\" and \"system:nodes\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "usages-missing",
@@ -877,7 +887,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr:   "",
+			authorize: false,
 		}, {
 			name: "usages-missing",
 			args: args{
@@ -924,7 +935,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: `map["client auth":{} "digital signature":{} "key encipherment":{}] is missing usages`,
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "usages-missing-1",
@@ -971,7 +983,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "usage-missing-2",
@@ -1018,7 +1031,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "usage-extra",
@@ -1067,7 +1081,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "Too few usages",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "csr-cn",
@@ -1115,7 +1130,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: otherName,
 			},
-			wantErr: "Mismatched CommonName system:node:foobar != system:node:test",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "csr-cn-2",
@@ -1163,7 +1179,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: noNamePrefix,
 			},
-			wantErr: "Mismatched CommonName test != system:node:test",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "csr-no-o",
@@ -1211,7 +1228,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: noGroup,
 			},
-			wantErr: "Organization [] doesn't include system:nodes",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "csr-extra-addr",
@@ -1259,7 +1277,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: extraAddr,
 			},
-			wantErr: "IP address '99.0.1.1' not in machine addresses: 127.0.0.1 10.0.0.1",
+			wantErr:   "IP address '99.0.1.1' not in machine addresses: 127.0.0.1 10.0.0.1",
+			authorize: false,
 		},
 		{
 			name: "csr-san-ip-mismatch",
@@ -1307,7 +1326,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "IP address '10.0.0.1' not in machine addresses: 127.0.0.1 10.0.0.2",
+			wantErr:   "IP address '10.0.0.1' not in machine addresses: 127.0.0.1 10.0.0.2",
+			authorize: false,
 		},
 		{
 			name: "csr-san-dns-mismatch",
@@ -1355,7 +1375,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr: "DNS name 'node1' not in machine names: node1.local node2",
+			wantErr:   "DNS name 'node1' not in machine names: node1.local node2",
+			authorize: false,
 		},
 
 		{
@@ -1400,7 +1421,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "",
+			wantErr:   "",
+			authorize: true,
 		},
 		{
 			name: "client extra O",
@@ -1435,7 +1457,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientExtraO,
 			},
-			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client with DNS",
@@ -1470,7 +1493,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientWithDNS,
 			},
-			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but extra usage",
@@ -1506,7 +1530,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but wrong usage",
@@ -1541,7 +1566,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but missing usage",
@@ -1575,7 +1601,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but wrong CN",
@@ -1610,7 +1637,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientWrongCN,
 			},
-			wantErr: "\"system:serviceaccount:openshift-machine-config-operator:node-bootstrapper\" doesn't match expected prefix: \"system:node:\"",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but wrong user",
@@ -1646,7 +1674,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR green for node client cert has wrong user system:serviceaccount:openshift-machine-config-operator:node-bootstrapper-not or groups map[system:authenticated:{} system:serviceaccounts:{} system:serviceaccounts:openshift-machine-config-operator:{}]",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but wrong user group",
@@ -1683,7 +1712,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR blue for node client cert has wrong user system:serviceaccount:openshift-machine-config-operator:node-bootstrapper or groups map[extra-group:{} system:authenticated:{} system:serviceaccounts:{} system:serviceaccounts:openshift-machine-config-operator:{}]",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but empty name",
@@ -1719,7 +1749,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientEmptyName,
 			},
-			wantErr: "CSR yellow has empty node name",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but node exists",
@@ -1754,7 +1785,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "node panda already exists or other error: <nil>",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but missing machine",
@@ -1788,7 +1820,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "failed to find machine for node panda",
+			wantErr:   "failed to find machine for node panda",
+			authorize: false,
 		},
 		{
 			name: "client good but machine has node ref",
@@ -1823,7 +1856,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "machine for node panda already has node ref",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but auto approval is disabled",
@@ -1874,7 +1908,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR orange for node client cert rejected as the flow is disabled",
+			wantErr:   "CSR orange for node client cert rejected as the flow is disabled",
+			authorize: false,
 		},
 		{
 			name: "client good with proper timing",
@@ -1925,7 +1960,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "",
+			wantErr:   "",
+			authorize: true,
 		},
 		{
 			name: "client good with proper timing 2",
@@ -1976,7 +2012,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "",
+			wantErr:   "",
+			authorize: true,
 		},
 		{
 			name: "client good but CSR too early",
@@ -2027,7 +2064,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR purple creation time 2020-11-19 00:02:00 +0000 UTC not in range (2020-11-19 00:02:50 +0000 UTC, 2020-11-19 02:03:00 +0000 UTC)",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "client good but CSR too late",
@@ -2078,7 +2116,8 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: clientGood,
 			},
-			wantErr: "CSR red creation time 2020-11-20 01:00:00 +0000 UTC not in range (2020-11-19 00:02:50 +0000 UTC, 2020-11-19 02:03:00 +0000 UTC)",
+			wantErr:   "",
+			authorize: false,
 		},
 		{
 			name: "successfull renew flow",
@@ -2105,6 +2144,7 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: goodCSR,
 				ca:  []*x509.Certificate{parseCert(t, rootCertGood)},
 			},
+			authorize: true,
 		},
 		{
 			name: "successfull fallback to fresh approval",
@@ -2157,6 +2197,7 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: goodCSR,
 				ca:  []*x509.Certificate{parseCert(t, rootCertGood)},
 			},
+			authorize: true,
 		},
 		{
 			name: "successfull fallback to fresh approval from incorrect server cert",
@@ -2184,7 +2225,8 @@ func Test_authorizeCSR(t *testing.T) {
 				ca:            []*x509.Certificate{parseCert(t, differentCert)},
 				kubeletServer: fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort+1), differentCert, differentKey),
 			},
-			wantErr: `No target machine for node "test"`,
+			wantErr:   "",
+			authorize: false,
 		},
 	}
 
@@ -2222,13 +2264,13 @@ func Test_authorizeCSR(t *testing.T) {
 				}
 				go respond(kubeletServer)
 			}
-			if err := authorizeCSR(cl, tt.args.config, tt.args.machines, tt.args.req, parsedCSR, ca); errString(err) != tt.wantErr {
+			if authorize, err := authorizeCSR(cl, tt.args.config, tt.args.machines, tt.args.req, parsedCSR, ca); authorize != tt.authorize || errString(err) != tt.wantErr {
 				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, tt.wantErr)
 			}
 		})
 
 		t.Run("Invalid call", func(t *testing.T) {
-			if err := authorizeCSR(nil, tt.args.config, tt.args.machines, nil, nil, nil); errString(err) != "Invalid request" {
+			if authorize, err := authorizeCSR(nil, tt.args.config, tt.args.machines, nil, nil, nil); authorize != false {
 				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, "Invalid request")
 			}
 		})

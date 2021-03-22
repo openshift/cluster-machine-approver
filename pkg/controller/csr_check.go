@@ -49,12 +49,14 @@ var PendingCSRs uint32
 
 func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
-		return "", fmt.Errorf("%q doesn't match expected prefix: %q", req.Spec.Username, nodeUserPrefix)
+		klog.Infof("%v: CSR does not appear to be a node serving cert", req.Name)
+		return "", nil
 	}
 
 	nodeAsking := strings.TrimPrefix(req.Spec.Username, nodeUserPrefix)
 	if len(nodeAsking) == 0 {
-		return "", fmt.Errorf("Empty name")
+		klog.Infof("%v: CSR does not appear to be a node serving cert", req.Name)
+		return "", nil
 	}
 
 	// Check groups, we need at least:
@@ -131,20 +133,30 @@ func authorizeCSR(
 	req *certificatesv1.CertificateSigningRequest,
 	csr *x509.CertificateRequest,
 	ca *x509.CertPool,
-) error {
+) (bool, error) {
 	if req == nil || csr == nil {
-		return fmt.Errorf("Invalid request")
+		klog.Errorf("authorizeCSR invalid request")
+		return false, nil
 	}
 
 	if isNodeClientCert(req, csr) {
-		return authorizeNodeClientCSR(c, config, machines, req, csr)
+		if config.NodeClientCert.Disabled {
+			klog.Errorf("%v: CSR rejected as the flow is disabled", req.Name)
+			return false, fmt.Errorf("CSR %s for node client cert rejected as the flow is disabled", req.Name)
+		}
+		return authorizeNodeClientCSR(c, machines, req, csr)
 	}
 
+	klog.Infof("%v: CSR does not appear to be client csr", req.Name)
 	// node serving cert validation after this point
 
 	nodeAsking, err := validateCSRContents(req, csr)
-	if err != nil {
-		return err
+	if nodeAsking == "" || err != nil {
+		if err != nil {
+			//TODO: set annotation/emit event here.
+			klog.Errorf("%v: Unrecoverable serving cert error, cannot approve: %v", req.Name, err)
+		}
+		return false, nil
 	}
 
 	// Check for an existing serving cert from the node.  If found, use the
@@ -162,16 +174,16 @@ func authorizeCSR(
 
 			// No error, the renewal is authorized.
 			if err == nil {
-				return nil
+				return true, nil
 			}
 
-			klog.Warningf("Could not use current serving cert for renewal: %v", err)
-			klog.Warningf("Current SAN Values: %v, CSR SAN Values: %v",
+			klog.Infof("Could not use current serving cert for renewal: %v", err)
+			klog.Infof("Current SAN Values: %v, CSR SAN Values: %v",
 				certSANs(servingCert), csrSANs(csr))
 		}
 
 		if err != nil {
-			klog.Warningf("Failed to retrieve current serving cert: %v", err)
+			klog.Infof("Failed to retrieve current serving cert: %v", err)
 		}
 	}
 
@@ -181,7 +193,9 @@ func authorizeCSR(
 	// Check that we have a registered node with the request name
 	targetMachine, ok := findMatchingMachineFromNodeRef(nodeAsking, machines)
 	if !ok {
-		return fmt.Errorf("No target machine for node %q", nodeAsking)
+		klog.Errorf("%v: Serving Cert: No target machine for node %q", req.Name, nodeAsking)
+		//TODO: set annotation/emit event here.
+		return false, nil
 	}
 
 	// SAN checks for both DNS and IPs, e.g.,
@@ -207,7 +221,11 @@ func authorizeCSR(
 		}
 		// The CSR requested a DNS name that did not belong to the machine
 		if !foundSan {
-			return fmt.Errorf("DNS name '%s' not in machine names: %s", san, strings.Join(attemptedAddresses, " "))
+			//TODO: set annotation/emit event here.
+			// return error so we requeue, in case machine network is out of date
+			// for some reason
+			klog.Errorf("%v: DNS name '%s' not in machine names: %s", req.Name, san, strings.Join(attemptedAddresses, " "))
+			return false, fmt.Errorf("DNS name '%s' not in machine names: %s", san, strings.Join(attemptedAddresses, " "))
 		}
 	}
 
@@ -231,47 +249,63 @@ func authorizeCSR(
 		}
 		// The CSR requested an IP name that did not belong to the machine
 		if !foundSan {
-			return fmt.Errorf("IP address '%s' not in machine addresses: %s", san, strings.Join(attemptedAddresses, " "))
+			//TODO: set annotation/emit event here.
+			// return error so we requeue, in case machine network is out of date
+			// for some reason
+			klog.Errorf("%v: IP address '%s' not in machine addresses: %s", req.Name, san, strings.Join(attemptedAddresses, " "))
+			return false, fmt.Errorf("IP address '%s' not in machine addresses: %s", san, strings.Join(attemptedAddresses, " "))
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
-func authorizeNodeClientCSR(c client.Client, config ClusterMachineApproverConfig, machines []machinev1.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) error {
-	if config.NodeClientCert.Disabled {
-		return fmt.Errorf("CSR %s for node client cert rejected as the flow is disabled", req.Name)
-	}
+func authorizeNodeClientCSR(c client.Client, machines []machinev1.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (bool, error) {
 
 	if !isReqFromNodeBootstrapper(req) {
-		return fmt.Errorf("CSR %s for node client cert has wrong user %s or groups %s", req.Name, req.Spec.Username, sets.NewString(req.Spec.Groups...))
+		klog.Infof("%v: CSR does not appear to be a valid node bootstrapper client cert request", req.Name)
+		return false, nil
 	}
 
 	nodeName := strings.TrimPrefix(csr.Subject.CommonName, nodeUserPrefix)
 	if len(nodeName) == 0 {
-		return fmt.Errorf("CSR %s has empty node name", req.Name)
+		//TODO: set annotation/emit event here.
+		klog.Errorf("%v: CSR does not appear to be a valid node bootstrapper client cert request", req.Name)
+		return false, nil
 	}
 
-	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, &corev1.Node{}); !apierrors.IsNotFound(err) {
-		return fmt.Errorf("node %s already exists or other error: %v", nodeName, err)
+	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, &corev1.Node{}); err != nil && !apierrors.IsNotFound(err) {
+		// possible transient API error, requeue
+		klog.Errorf("%v: unable to get node %s error: %v", req.Name, nodeName, err)
+		return false, fmt.Errorf("failed get existing nodes %s", nodeName)
+	} else if err == nil {
+		//TODO: set annotation/emit event here.
+		klog.Errorf("%v: node %s already exists, cannot approve", req.Name, nodeName)
+		return false, nil
 	}
 
 	nodeMachine, ok := findMatchingMachineFromInternalDNS(nodeName, machines)
 	if !ok {
-		return fmt.Errorf("failed to find machine for node %s", nodeName)
+		//TODO: set annotation/emit event here.
+		klog.Errorf("%v: failed to find machine for node %s, cannot approve", req.Name, nodeName)
+		return false, fmt.Errorf("failed to find machine for node %s", nodeName)
 	}
 
 	if nodeMachine.Status.NodeRef != nil {
-		return fmt.Errorf("machine for node %s already has node ref", nodeName)
+		//TODO: set annotation/emit event here.
+		klog.Errorf("%v: machine for node %s already has node ref, cannot approve", req.Name, nodeName)
+		return false, nil
 	}
 
 	start := nodeMachine.CreationTimestamp.Add(-maxMachineClockSkew)
 	end := nodeMachine.CreationTimestamp.Add(maxMachineDelta)
 	if !inTimeSpan(start, end, req.CreationTimestamp.Time) {
-		return fmt.Errorf("CSR %s creation time %s not in range (%s, %s)", req.Name, req.CreationTimestamp.Time, start, end)
+		//TODO: set annotation/emit event here.
+		klog.Errorf("%v: CSR creation time %s not in range (%s, %s)", req.Name, req.CreationTimestamp.Time, start, end)
+		return false, nil
 	}
 
-	return nil // approve node client cert
+	return true, nil // approve node client cert
 }
 
 // authorizeServingRenewal will authorize the renewal of a kubelet's serving
