@@ -70,7 +70,7 @@ for new nodes.
 
 ### Node Client CSR Approval Workflow
 
-CSR approval details can be found in [csr_check.go](csr_check.go).  Assuming
+CSR approval details can be found in [csr_check.go](https://github.com/openshift/cluster-machine-approver/blob/master/pkg/controller/csr_check.go).  Assuming
 this has not been disabled, the following criteria must be met for the client
 CSR to be approved:
 
@@ -92,7 +92,7 @@ CSR to be approved:
 ### Node Server CSR Approval Workflow
 
 Details of this workflow can be found in the same file as the client workflow,
-[csr_check.go](csr_check.go).
+[csr_check.go](https://github.com/openshift/cluster-machine-approver/blob/master/pkg/controller/csr_check.go).
 
 For this workflow, it is assumed that the `Node` is now up and running, and the
 `Node` object exists in the API.  Validation for the server CSR is different
