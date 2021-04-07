@@ -19,6 +19,8 @@ spec:
   template:
     metadata:
       name: machine-approver
+      annotations:
+        target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
       labels:
         app: machine-approver
     spec:
