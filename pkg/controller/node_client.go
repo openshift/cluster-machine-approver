@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strings"
 
-	certificatesv1 "k8s.io/api/certificates/v1beta1"
+	certificatesv1 "k8s.io/api/certificates/v1"
 )
 
 // copied from k8s.io/kubernetes/pkg/controller/certificates/approver/sarapprove.go

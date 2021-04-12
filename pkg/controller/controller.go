@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 
 	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
-	certificatesv1 "k8s.io/api/certificates/v1beta1"
-	certificatesv1beta1 "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
+	certificatesv1 "k8s.io/api/certificates/v1"
+	certificatesv1client "k8s.io/client-go/kubernetes/typed/certificates/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -216,13 +216,14 @@ func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) e
 		Reason:         "NodeCSRApprove",
 		Message:        "This CSR was approved by the Node CSR Approver",
 		LastUpdateTime: metav1.Now(),
+		Status:         "True",
 	})
-	certClient, err := certificatesv1beta1.NewForConfig(rest)
+	certClient, err := certificatesv1client.NewForConfig(rest)
 	if err != nil {
 		return err
 	}
 	if _, err := certClient.CertificateSigningRequests().
-		UpdateApproval(context.Background(), csr, metav1.UpdateOptions{}); err != nil {
+		UpdateApproval(context.Background(), csr.Name, csr, metav1.UpdateOptions{}); err != nil {
 		return err
 	}
 	return nil
