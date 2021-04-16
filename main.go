@@ -38,12 +38,15 @@ import (
 
 func main() {
 	var cliConfig string
+	var APIGroup string
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
 	klog.InitFlags(flagSet)
 	flagSet.StringVar(&cliConfig, "config", "", "CLI config")
 	flagSet.Parse(os.Args[1:])
+
+	flagSet.StringVar(&APIGroup, "apigroup", "machine.openshift.io", "API group for machines, defaults to machine.openshift.io")
 
 	// Now let's start the controller
 	stop := make(chan struct{})
