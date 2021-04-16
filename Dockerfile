@@ -1,9 +1,9 @@
-FROM registry.svc.ci.openshift.org/openshift/release:golang-1.15 AS builder
+FROM registry.ci.openshift.org/openshift/release:golang-1.15 AS builder
 WORKDIR /go/src/github.com/openshift/cluster-machine-approver
 COPY . .
 RUN make build
 
-FROM registry.svc.ci.openshift.org/openshift/origin-v4.0:base
+FROM registry.ci.openshift.org/openshift/origin-v4.0:base
 COPY --from=builder /go/src/github.com/openshift/cluster-machine-approver/machine-approver /usr/bin/
 COPY manifests /manifests
 ENTRYPOINT ["/usr/bin/machine-approver"]
