@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
@@ -57,8 +58,10 @@ func main() {
 
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
+	syncPeriod := 10 * time.Minute
 	mgr, err := manager.New(control.GetConfigOrDie(), manager.Options{
 		MetricsBindAddress: metricsPort,
+		SyncPeriod:         &syncPeriod,
 	})
 	if err != nil {
 		klog.Fatalf("unable to set up overall controller manager: %v", err)
