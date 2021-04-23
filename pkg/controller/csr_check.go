@@ -195,7 +195,8 @@ func authorizeCSR(
 	if !ok {
 		klog.Errorf("%v: Serving Cert: No target machine for node %q", req.Name, nodeAsking)
 		//TODO: set annotation/emit event here.
-		return false, nil
+		// Return error so we requeue in case we're racing with node linker.
+		return false, fmt.Errorf("Unable to find machine for node")
 	}
 
 	// SAN checks for both DNS and IPs, e.g.,

@@ -644,7 +644,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr:   "",
+			wantErr:   "Unable to find machine for node",
 			authorize: false,
 		},
 		{
@@ -2225,7 +2225,7 @@ func Test_authorizeCSR(t *testing.T) {
 				ca:            []*x509.Certificate{parseCert(t, differentCert)},
 				kubeletServer: fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort+1), differentCert, differentKey),
 			},
-			wantErr:   "",
+			wantErr:   "Unable to find machine for node",
 			authorize: false,
 		},
 	}
