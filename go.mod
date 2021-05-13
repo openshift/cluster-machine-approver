@@ -14,7 +14,7 @@ require (
 	k8s.io/apimachinery v0.21.0
 	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 	k8s.io/klog/v2 v2.8.0
-	sigs.k8s.io/controller-runtime v0.9.0-alpha.1
+	sigs.k8s.io/controller-runtime v0.9.0-beta.1.0.20210512131817-ce2f0c92d77e
 )
 
 replace k8s.io/client-go => k8s.io/client-go v0.21.0
