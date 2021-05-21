@@ -93,10 +93,9 @@ const (
 	defaultGCPCredentialsSecret = "gcp-cloud-credentials"
 	defaultGCPDiskSizeGb        = 128
 	defaultGCPDiskType          = "pd-standard"
-	// https://releases-art-rhcos.svc.ci.openshift.org/art/storage/releases/rhcos-4.6/46.82.202007212240-0/x86_64/meta.json
-	// https://github.com/openshift/installer/pull/3808
-	// https://github.com/openshift/installer/blob/d75bf7ad98124b901ae7e22b5595e0392ed6ea3c/data/data/rhcos.json
-	defaultGCPDiskImage = "projects/rhcos-cloud/global/images/rhcos-46-82-202007212240-0-gcp-x86-64"
+	// https://releases-art-rhcos.svc.ci.openshift.org/art/storage/releases/rhcos-4.7/47.83.202103251640-0/x86_64/meta.json
+	// https://github.com/openshift/installer/blob/fae650e24e7036b333b2b2d9dfb5a08a29cd07b1/data/data/rhcos.json#L93-L97
+	defaultGCPDiskImage = "projects/rhcos-cloud/global/images/rhcos-47-83-202103251640-0-gcp-x86-64"
 
 	// vSphere Defaults
 	defaultVSphereCredentialsSecret = "vsphere-cloud-credentials"
@@ -224,19 +223,10 @@ type machineDefaulterHandler struct {
 }
 
 // NewValidator returns a new machineValidatorHandler.
-func NewMachineValidator() (*machineValidatorHandler, error) {
+func NewMachineValidator(client client.Client) (*machineValidatorHandler, error) {
 	infra, err := getInfra()
 	if err != nil {
 		return nil, err
-	}
-
-	cfg, err := ctrl.GetConfig()
-	if err != nil {
-		return nil, err
-	}
-	c, err := client.New(cfg, client.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to build kubernetes client: %v", err)
 	}
 
 	dns, err := getDNS()
@@ -244,7 +234,7 @@ func NewMachineValidator() (*machineValidatorHandler, error) {
 		return nil, err
 	}
 
-	return createMachineValidator(infra, c, dns), nil
+	return createMachineValidator(infra, client, dns), nil
 }
 
 func createMachineValidator(infra *osconfigv1.Infrastructure, client client.Client, dns *osconfigv1.DNS) *machineValidatorHandler {
@@ -489,11 +479,6 @@ func MachineSetMutatingWebhook() admissionregistrationv1.MutatingWebhook {
 	}
 }
 
-func responseWithWarnings(response admission.Response, warnings []string) admission.Response {
-	response.AdmissionResponse.Warnings = warnings
-	return response
-}
-
 // Handle handles HTTP requests for admission webhook servers.
 func (h *machineValidatorHandler) Handle(ctx context.Context, req admission.Request) admission.Response {
 	m := &Machine{}
@@ -506,10 +491,10 @@ func (h *machineValidatorHandler) Handle(ctx context.Context, req admission.Requ
 
 	ok, warnings, errs := h.webhookOperations(m, h.admissionConfig)
 	if !ok {
-		return responseWithWarnings(admission.Denied(errs.Error()), warnings)
+		return admission.Denied(errs.Error()).WithWarnings(warnings...)
 	}
 
-	return responseWithWarnings(admission.Allowed("Machine valid"), warnings)
+	return admission.Allowed("Machine valid").WithWarnings(warnings...)
 }
 
 // Handle handles HTTP requests for admission webhook servers.
@@ -535,14 +520,14 @@ func (h *machineDefaulterHandler) Handle(ctx context.Context, req admission.Requ
 
 	ok, warnings, errs := h.webhookOperations(m, h.admissionConfig)
 	if !ok {
-		return responseWithWarnings(admission.Denied(errs.Error()), warnings)
+		return admission.Denied(errs.Error()).WithWarnings(warnings...)
 	}
 
 	marshaledMachine, err := json.Marshal(m)
 	if err != nil {
-		return responseWithWarnings(admission.Errored(http.StatusInternalServerError, err), warnings)
+		return admission.Errored(http.StatusInternalServerError, err).WithWarnings(warnings...)
 	}
-	return responseWithWarnings(admission.PatchResponseFromRaw(req.Object.Raw, marshaledMachine), warnings)
+	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledMachine).WithWarnings(warnings...)
 }
 
 type awsDefaulter struct {
