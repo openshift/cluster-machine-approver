@@ -27,7 +27,9 @@ import (
 	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
+	corev1 "k8s.io/api/core/v1"
 	control "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -78,10 +80,25 @@ func main() {
 		klog.Fatal("unable to add Machines to scheme")
 	}
 
+	// Prevent the controller from caching node and machine objects.
+	// Stale nodes and machines can cause the approver to not approve certificates
+	// within a timely manner, leading to failed node bootstraps.
+	approverClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
+		Client:      mgr.GetClient(),
+		CacheReader: mgr.GetClient(),
+		UncachedObjects: []client.Object{
+			&machinev1.Machine{},
+			&corev1.Node{},
+		},
+	})
+	if err != nil {
+		klog.Fatalf("unable to set up delegating client: %v", err)
+	}
+
 	// Setup all Controllers
 	klog.Info("setting up controllers")
 	if err = (&controller.CertificateApprover{
-		Client:  mgr.GetClient(),
+		Client:  approverClient,
 		RestCfg: mgr.GetConfig(),
 		Config:  controller.LoadConfig(cliConfig),
 	}).SetupWithManager(mgr, ctrl.Options{}); err != nil {
