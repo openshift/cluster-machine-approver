@@ -80,11 +80,18 @@ func main() {
 		klog.Fatal("unable to add Machines to scheme")
 	}
 
+	directClient, err := client.New(mgr.GetConfig(), client.Options{
+		Scheme: mgr.GetScheme(),
+		Mapper: mgr.GetRESTMapper(),
+	})
+	if err != nil {
+		klog.Fatal("unable to set up client")
+	}
 	// Prevent the controller from caching node and machine objects.
 	// Stale nodes and machines can cause the approver to not approve certificates
 	// within a timely manner, leading to failed node bootstraps.
 	approverClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		Client:      mgr.GetClient(),
+		Client:      directClient,
 		CacheReader: mgr.GetClient(),
 		UncachedObjects: []client.Object{
 			&machinev1.Machine{},
