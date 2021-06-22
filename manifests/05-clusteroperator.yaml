@@ -8,6 +8,13 @@ metadata:
     include.release.openshift.io/single-node-developer: "true"
 spec: {}
 status:
+  relatedObjects:
+  - group: ""
+    name: openshift-cluster-machine-approver
+    resource: namespaces
+  - group: certificates.k8s.io
+    name: ""
+    resource: certificatesigningrequests
   versions:
     - name: operator
       version: "0.0.1-snapshot"
