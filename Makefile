@@ -25,7 +25,7 @@ ifeq ($(NO_DOCKER), 1)
   DOCKER_CMD =
   IMAGE_BUILD_CMD = imagebuilder
 else
-  DOCKER_CMD := $(ENGINE) run --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --rm -v "$(PWD)":/go/src/github.com/openshift/cluster-machine-approver:Z  -w /go/src/github.com/openshift/cluster-machine-approver openshift/origin-release:golang-1.15
+  DOCKER_CMD := $(ENGINE) run --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --rm -v "$(PWD)":/go/src/github.com/openshift/cluster-machine-approver:Z  -w /go/src/github.com/openshift/cluster-machine-approver openshift/origin-release:golang-1.16
   IMAGE_BUILD_CMD = $(ENGINE) build
 endif
 
