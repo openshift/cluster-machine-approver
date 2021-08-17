@@ -24,9 +24,9 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
-	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
+	machinev1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	control "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
