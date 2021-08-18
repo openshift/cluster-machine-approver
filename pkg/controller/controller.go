@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
+	machinev1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	certificatesv1client "k8s.io/client-go/kubernetes/typed/certificates/v1"
 
