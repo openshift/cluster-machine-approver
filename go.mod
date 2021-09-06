@@ -3,6 +3,7 @@ module github.com/openshift/cluster-machine-approver
 go 1.16
 
 require (
+	github.com/mitchellh/mapstructure v1.1.2
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.13.0
 	github.com/openshift/api v0.0.0-20210816181336-8ff39b776da3
