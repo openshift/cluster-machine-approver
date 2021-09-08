@@ -85,7 +85,7 @@ func main() {
 
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
-	mgr, err := manager.New(managementConfig, manager.Options{
+	mgr, err := manager.New(workloadConfig, manager.Options{
 		MetricsBindAddress: metricsPort,
 	})
 	if err != nil {
@@ -105,9 +105,6 @@ func main() {
 	uncachedManagementClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
 		Client:      *managementClient,
 		CacheReader: mgr.GetClient(),
-		UncachedObjects: []client.Object{
-			&corev1.Node{},
-		},
 		// CacheUnstructured should be false because we manipulate with unstructured machines
 		CacheUnstructured: false,
 	})
@@ -121,8 +118,6 @@ func main() {
 		UncachedObjects: []client.Object{
 			&corev1.Node{},
 		},
-		// CacheUnstructured should be false because we manipulate with unstructured machines
-		CacheUnstructured: false,
 	})
 	if err != nil {
 		klog.Fatalf("unable to set up delegating client: %v", err)
