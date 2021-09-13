@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	machinev1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
+	machinehandlerpkg "github.com/openshift/cluster-machine-approver/pkg/machinehandler"
 )
 
 /*
@@ -451,7 +451,7 @@ func Test_authorizeCSR(t *testing.T) {
 
 	type args struct {
 		config        ClusterMachineApproverConfig
-		machines      []machinev1.Machine
+		machines      []machinehandlerpkg.Machine
 		node          *corev1.Node
 		kubeletServer net.Listener
 		req           *certificatesv1.CertificateSigningRequest
@@ -467,9 +467,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "ok",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -525,9 +525,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "no-node-prefix",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -574,9 +574,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "only-node-prefix",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -623,9 +623,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "no-machine-status-ref",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{},
+						Status: machinehandlerpkg.MachineStatus{},
 					},
 				},
 				req: &certificatesv1.CertificateSigningRequest{
@@ -650,9 +650,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "missing-groups-1",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -698,9 +698,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "missing-groups-2",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -746,9 +746,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "extra-group",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -796,9 +796,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "wrong-group",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -845,9 +845,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usages-missing",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -892,9 +892,9 @@ func Test_authorizeCSR(t *testing.T) {
 		}, {
 			name: "usages-missing",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -941,9 +941,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usages-missing-1",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -989,9 +989,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usage-missing-2",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1037,9 +1037,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usage-extra",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1087,9 +1087,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-cn",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1136,9 +1136,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-cn-2",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1185,9 +1185,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-no-o",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1234,9 +1234,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-extra-addr",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1283,9 +1283,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-san-ip-mismatch",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1332,9 +1332,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-san-dns-mismatch",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -1382,9 +1382,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1394,7 +1394,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1427,9 +1427,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client extra O",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1463,9 +1463,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client with DNS",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1499,9 +1499,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but extra usage",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1536,9 +1536,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong usage",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1572,9 +1572,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but missing usage",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1607,9 +1607,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong CN",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1643,9 +1643,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong user",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1680,9 +1680,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but wrong user group",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1718,9 +1718,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but empty name",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1755,9 +1755,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but node exists",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1791,9 +1791,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but missing machine",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeExternalDNS,
@@ -1826,9 +1826,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but machine has node ref",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{Name: "other"},
 							Addresses: []corev1.NodeAddress{
 								{
@@ -1867,9 +1867,9 @@ func Test_authorizeCSR(t *testing.T) {
 						Disabled: true,
 					},
 				},
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1879,7 +1879,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1914,9 +1914,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good with proper timing",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1929,7 +1929,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(2 * time.Minute),
 						},
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1966,9 +1966,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good with proper timing 2",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -1981,7 +1981,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
 						},
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2018,9 +2018,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but CSR too early",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2033,7 +2033,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
 						},
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2070,9 +2070,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "client good but CSR too late",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2085,7 +2085,7 @@ func Test_authorizeCSR(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
 						},
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							Addresses: []corev1.NodeAddress{
 								{
 									Type:    corev1.NodeInternalDNS,
@@ -2149,9 +2149,9 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "successfull fallback to fresh approval",
 			args: args{
-				machines: []machinev1.Machine{
+				machines: []machinehandlerpkg.Machine{
 					{
-						Status: machinev1.MachineStatus{
+						Status: machinehandlerpkg.MachineStatus{
 							NodeRef: &corev1.ObjectReference{
 								Name: "test",
 							},
@@ -2636,12 +2636,12 @@ func creationTimestamp(delta time.Duration) metav1.Time {
 }
 
 func TestGetMaxPending(t *testing.T) {
-	ml := []machinev1.Machine{
+	ml := []machinehandlerpkg.Machine{
 		{
-			Status: machinev1.MachineStatus{},
+			Status: machinehandlerpkg.MachineStatus{},
 		},
 		{
-			Status: machinev1.MachineStatus{},
+			Status: machinehandlerpkg.MachineStatus{},
 		},
 	}
 
