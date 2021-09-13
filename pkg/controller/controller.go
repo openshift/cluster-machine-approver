@@ -164,6 +164,15 @@ func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, csrs 
 }
 
 func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) error {
+	// If a CSR is approved after being added to the queue, but before we reconcile it,
+	// it may have already been approved. If it has already been approved, trying to
+	// approve it again will result in an error and cause a loop.
+	// Return early if the CSR has been approved externally.
+	if isApproved(csr) {
+		klog.Infof("%v: CSR is already approved", csr.Name)
+		return nil
+	}
+
 	parsedCSR, err := parseCSR(&csr)
 	if err != nil {
 		klog.Errorf("%v: Failed to parse csr: %v", csr.Name, err)
