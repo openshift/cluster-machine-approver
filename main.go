@@ -44,6 +44,7 @@ func main() {
 	var cliConfig string
 	var APIGroup string
 	var managementKubeConfigPath string
+	var machineNamespace string
 	var workloadKubeConfigPath string
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
@@ -52,6 +53,7 @@ func main() {
 	flagSet.StringVar(&cliConfig, "config", "", "CLI config")
 	flagSet.StringVar(&APIGroup, "apigroup", "machine.openshift.io", "API group for machines, defaults to machine.openshift.io")
 	flagSet.StringVar(&managementKubeConfigPath, "management-cluster-kubeconfig", "", "management kubeconfig path,")
+	flagSet.StringVar(&machineNamespace, "machine-namespace", "", "restrict machine operations to a specific namespace, if not set, all machines will be observed in approval decisions")
 	flagSet.StringVar(&workloadKubeConfigPath, "workload-cluster-kubeconfig", "", "workload kubeconfig path")
 
 	flagSet.Parse(os.Args[1:])
@@ -126,12 +128,13 @@ func main() {
 	// Setup all Controllers
 	klog.Info("setting up controllers")
 	if err = (&controller.CertificateApprover{
-		MachineClient:  uncachedManagementClient,
-		MachineRestCfg: managementConfig,
-		NodeClient:     uncachedWorkloadClient,
-		NodeRestCfg:    workloadConfig,
-		Config:         controller.LoadConfig(cliConfig),
-		APIGroup:       APIGroup,
+		MachineClient:    uncachedManagementClient,
+		MachineRestCfg:   managementConfig,
+		MachineNamespace: machineNamespace,
+		NodeClient:       uncachedWorkloadClient,
+		NodeRestCfg:      workloadConfig,
+		Config:           controller.LoadConfig(cliConfig),
+		APIGroup:         APIGroup,
 	}).SetupWithManager(mgr, ctrl.Options{}); err != nil {
 		klog.Fatalf("unable to create CSR controller: %v", err)
 	}

@@ -21,10 +21,11 @@ var (
 )
 
 type MachineHandler struct {
-	APIGroup string
-	Client   client.Client
-	Config   *rest.Config
-	Ctx      context.Context
+	APIGroup  string
+	Client    client.Client
+	Config    *rest.Config
+	Ctx       context.Context
+	Namespace string
 }
 
 type Machine struct {
@@ -49,7 +50,11 @@ func (m *MachineHandler) ListMachines() ([]Machine, error) {
 		Kind:    "MachineList",
 		Version: APIVersion,
 	})
-	if err := m.Client.List(m.Ctx, unstructuredMachineList); err != nil {
+	listOpts := make([]client.ListOption, 0)
+	if m.Namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(m.Namespace))
+	}
+	if err := m.Client.List(m.Ctx, unstructuredMachineList, listOpts...); err != nil {
 		return nil, err
 	}
 
