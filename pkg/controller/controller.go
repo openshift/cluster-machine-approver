@@ -36,8 +36,9 @@ type CertificateApprover struct {
 	NodeClient  client.Client
 	NodeRestCfg *rest.Config
 
-	MachineClient  client.Client
-	MachineRestCfg *rest.Config
+	MachineClient    client.Client
+	MachineRestCfg   *rest.Config
+	MachineNamespace string
 
 	Config   ClusterMachineApproverConfig
 	APIGroup string
@@ -121,10 +122,11 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	machineHandler := &machinehandlerpkg.MachineHandler{
-		Client:   m.MachineClient,
-		Config:   m.MachineRestCfg,
-		Ctx:      ctx,
-		APIGroup: m.APIGroup,
+		Client:    m.MachineClient,
+		Config:    m.MachineRestCfg,
+		Ctx:       ctx,
+		APIGroup:  m.APIGroup,
+		Namespace: m.MachineNamespace,
 	}
 
 	machines, err := machineHandler.ListMachines()
