@@ -46,6 +46,7 @@ func main() {
 	var managementKubeConfigPath string
 	var machineNamespace string
 	var workloadKubeConfigPath string
+	var disableStatusController bool
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
@@ -55,6 +56,7 @@ func main() {
 	flagSet.StringVar(&managementKubeConfigPath, "management-cluster-kubeconfig", "", "management kubeconfig path,")
 	flagSet.StringVar(&machineNamespace, "machine-namespace", "", "restrict machine operations to a specific namespace, if not set, all machines will be observed in approval decisions")
 	flagSet.StringVar(&workloadKubeConfigPath, "workload-cluster-kubeconfig", "", "workload kubeconfig path")
+	flagSet.BoolVar(&disableStatusController, "disable-status-controller", false, "disable status controller that will update the machine-approver clusteroperator status")
 
 	flagSet.Parse(os.Args[1:])
 
@@ -139,9 +141,11 @@ func main() {
 		klog.Fatalf("unable to create CSR controller: %v", err)
 	}
 
-	statusController := NewStatusController(mgr.GetConfig())
-	go statusController.Run(1, stop)
-	statusController.versionGetter.SetVersion(operatorVersionKey, getReleaseVersion())
+	if !disableStatusController {
+		statusController := NewStatusController(mgr.GetConfig())
+		go statusController.Run(1, stop)
+		statusController.versionGetter.SetVersion(operatorVersionKey, getReleaseVersion())
+	}
 
 	// Start the Cmd
 	klog.Info("starting the cmd")
