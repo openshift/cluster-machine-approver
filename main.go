@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
@@ -28,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
 	control "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,6 +49,12 @@ func main() {
 	var machineNamespace string
 	var workloadKubeConfigPath string
 	var disableStatusController bool
+	var leaderElect bool
+	var leaderElectLeaseDuration time.Duration
+	var leaderElectRenewDeadline time.Duration
+	var leaderElectRetryPeriod time.Duration
+	var leaderElectResourceName string
+	var leaderElectResourceNamespace string
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
@@ -58,6 +66,12 @@ func main() {
 	flagSet.StringVar(&workloadKubeConfigPath, "workload-cluster-kubeconfig", "", "workload kubeconfig path")
 	flagSet.BoolVar(&disableStatusController, "disable-status-controller", false, "disable status controller that will update the machine-approver clusteroperator status")
 
+	flagSet.BoolVar(&leaderElect, "leader-elect", true, "use leader election when starting the manager.")
+	flagSet.DurationVar(&leaderElectLeaseDuration, "leader-elect-lease-duration", 137*time.Second, "the duration that non-leader candidates will wait to force acquire leadership.")
+	flagSet.DurationVar(&leaderElectRenewDeadline, "leader-elect-renew-deadline", 107*time.Second, "the duration that the acting controlplane will retry refreshing leadership before giving up.")
+	flagSet.DurationVar(&leaderElectRetryPeriod, "leader-elect-retry-period", 26*time.Second, "the duration the LeaderElector clients should wait between tries of actions.")
+	flagSet.StringVar(&leaderElectResourceName, "leader-elect-resource-name", "cluster-machine-approver-leader", "the name of the resource that leader election will use for holding the leader lock.")
+	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
 	flagSet.Parse(os.Args[1:])
 
 	if err := validateAPIGroup(APIGroup); err != nil {
@@ -90,7 +104,15 @@ func main() {
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
 	mgr, err := manager.New(workloadConfig, manager.Options{
-		MetricsBindAddress: metricsPort,
+		MetricsBindAddress:            metricsPort,
+		LeaderElectionNamespace:       leaderElectResourceNamespace,
+		LeaderElection:                leaderElect,
+		LeaseDuration:                 &leaderElectLeaseDuration,
+		LeaderElectionID:              leaderElectResourceName,
+		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
+		LeaderElectionReleaseOnCancel: true,
+		RetryPeriod:                   &leaderElectRetryPeriod,
+		RenewDeadline:                 &leaderElectRenewDeadline,
 	})
 	if err != nil {
 		klog.Fatalf("unable to set up overall controller manager: %v", err)
@@ -143,7 +165,10 @@ func main() {
 
 	if !disableStatusController {
 		statusController := NewStatusController(mgr.GetConfig())
-		go statusController.Run(1, stop)
+		go func() {
+			<-mgr.Elected()
+			statusController.Run(1, stop)
+		}()
 		statusController.versionGetter.SetVersion(operatorVersionKey, getReleaseVersion())
 	}
 
