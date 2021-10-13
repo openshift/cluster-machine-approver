@@ -142,7 +142,16 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	for _, csr := range csrs.Items {
 		if csr.Name == req.Name {
-			return reconcile.Result{}, m.reconcileCSR(csr, machines)
+			if err := m.reconcileCSR(csr, machines); err != nil {
+				return reconcile.Result{}, fmt.Errorf("could not reconcile CSR: %v", err)
+			}
+
+			// Reconcile the limits at the end of a reconcile so that the currently
+			// pending CSRs metric has an up to date value if we approved a CSR.
+			// When an error occurs, we requeue and so update the limits on the
+			// next reconcile.
+			// Don't use a cached client here else we may not have up to date CSRs.
+			return reconcile.Result{}, reconcileLimitsUncached(m.NodeRestCfg, csr.Name, machines)
 		}
 	}
 
@@ -163,6 +172,24 @@ func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, csrs 
 	}
 
 	return false
+}
+
+// reconcileLimitsUncached is used to update the limits using an uncached certificates list.
+// This is used at the end of the approval process to ensure that the limits (and therefore)
+// the metrics are always up to date.
+func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machinehandlerpkg.Machine) error {
+	certClient, err := certificatesv1client.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("could not initialise certificates client: %v", err)
+	}
+
+	certificates, err := certClient.CertificateSigningRequests().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("could not list CSRs: %v", err)
+	}
+
+	reconcileLimits(csrName, machines, certificates)
+	return nil
 }
 
 func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) error {
