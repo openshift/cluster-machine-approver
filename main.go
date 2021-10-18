@@ -24,6 +24,7 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
+	networkv1 "github.com/openshift/api/network/v1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
 	machinev1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
@@ -75,6 +76,9 @@ func main() {
 	if err := configv1.Install(mgr.GetScheme()); err != nil {
 		klog.Fatal(err)
 	}
+	if err := networkv1.Install(mgr.GetScheme()); err != nil {
+		klog.Fatal(err)
+	}
 
 	if err := machinev1.AddToScheme(mgr.GetScheme()); err != nil {
 		klog.Fatal("unable to add Machines to scheme")
@@ -96,6 +100,8 @@ func main() {
 		UncachedObjects: []client.Object{
 			&machinev1.Machine{},
 			&corev1.Node{},
+			&configv1.Network{},
+			&networkv1.HostSubnet{},
 		},
 	})
 	if err != nil {
