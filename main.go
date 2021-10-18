@@ -23,6 +23,7 @@ import (
 	"strconv"
 
 	configv1 "github.com/openshift/api/config/v1"
+	networkv1 "github.com/openshift/api/network/v1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
 	corev1 "k8s.io/api/core/v1"
@@ -102,6 +103,9 @@ func main() {
 	if err := configv1.Install(mgr.GetScheme()); err != nil {
 		klog.Fatal(err)
 	}
+	if err := networkv1.Install(mgr.GetScheme()); err != nil {
+		klog.Fatal(err)
+	}
 
 	// Prevent the controller from caching node and machine objects.
 	// Stale nodes and machines can cause the approver to not approve certificates
@@ -121,6 +125,8 @@ func main() {
 		CacheReader: mgr.GetClient(),
 		UncachedObjects: []client.Object{
 			&corev1.Node{},
+			&configv1.Network{},
+			&networkv1.HostSubnet{},
 		},
 	})
 	if err != nil {

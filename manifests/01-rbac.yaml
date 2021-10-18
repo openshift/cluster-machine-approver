@@ -134,6 +134,18 @@ rules:
   - machine-approver
   verbs:
   - update
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - networks
+  verbs:
+  - get
+- apiGroups:
+  - network.openshift.io
+  resources:
+  - hostsubnets
+  verbs:
+  - get
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
