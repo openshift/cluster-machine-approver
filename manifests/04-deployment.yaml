@@ -63,6 +63,11 @@ spec:
         - "--config=/var/run/configmaps/config/config.yaml"
         - "-v=2"
         - "--logtostderr"
+        - "--leader-elect=true"
+        - "--leader-elect-lease-duration=137s"
+        - "--leader-elect-renew-deadline=107s"
+        - "--leader-elect-retry-period=26s"
+        - "--leader-elect-resource-namespace=openshift-cluster-machine-approver"
         resources:
           requests:
             memory: 50Mi

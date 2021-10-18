@@ -9,8 +9,8 @@ require (
 	github.com/openshift/api v0.0.0-20210816181336-8ff39b776da3
 	github.com/openshift/client-go v0.0.0-20210730113412-1811c1b3fc0e
 	github.com/openshift/library-go v0.0.0-20210811133500-5e31383de2a7
-	github.com/openshift/machine-api-operator v0.2.1-0.20210810163111-abd3c0efdfee
 	github.com/prometheus/client_golang v1.11.0
+	golang.org/x/oauth2 v0.0.0-20200902213428-5d25da1a8d43 // indirect
 	k8s.io/api v0.22.0
 	k8s.io/apimachinery v0.22.0
 	k8s.io/client-go v0.22.0
