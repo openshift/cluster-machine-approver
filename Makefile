@@ -4,7 +4,7 @@ GOFLAGS ?= -mod=vendor
 export GOFLAGS
 GOPROXY ?=
 export GOPROXY
-BUILD_IMAGE ?= openshift/origin-release:golang-1.16
+BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.17
 
 
 NO_DOCKER ?= 0
