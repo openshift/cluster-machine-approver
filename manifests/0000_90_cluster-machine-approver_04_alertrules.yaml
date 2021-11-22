@@ -21,4 +21,10 @@ spec:
           labels:
             severity: warning
           annotations:
-            message: "max pending CSRs threshold reached."
+            summary: "max pending CSRs threshold reached."
+            description: |
+              The number of pending CertificateSigningRequests has exceeded the
+              maximum threshold (current number of machine + 100). Check the
+              pending CSRs to determine which machines need approval, also check
+              that the nodelink controller is running in the openshift-machine-api
+              namespace.
