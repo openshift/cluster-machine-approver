@@ -52,6 +52,7 @@ var now = time.Now
 
 var MaxPendingCSRs uint32
 var PendingCSRs uint32
+var OldPendingCSRs uint32
 
 func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
@@ -457,6 +458,10 @@ func inTimeSpan(start, end, check time.Time) bool {
 	return check.After(start) && check.Before(end)
 }
 
+func afterTime(end, check time.Time) bool {
+	return check.Before(end)
+}
+
 func isApproved(csr certificatesv1.CertificateSigningRequest) bool {
 	for _, condition := range csr.Status.Conditions {
 		if condition.Type == certificatesv1.CertificateApproved {
@@ -466,26 +471,27 @@ func isApproved(csr certificatesv1.CertificateSigningRequest) bool {
 	return false
 }
 
-func recentlyPendingCSRs(csrs []certificatesv1.CertificateSigningRequest) int {
+func pendingCSRsByAge(csrs []certificatesv1.CertificateSigningRequest) (int, int) {
 	// assumes we are scheduled on the master meaning our clock is the same
 	currentTime := now()
 	start := currentTime.Add(-maxPendingDelta)
 	end := currentTime.Add(maxMachineClockSkew)
 
-	var pending int
+	var recentlyPending, oldPending int
 
 	for _, csr := range csrs {
-		// ignore "old" CSRs
-		if !inTimeSpan(start, end, csr.CreationTimestamp.Time) {
+		if isApproved(csr) {
 			continue
 		}
 
-		if !isApproved(csr) {
-			pending++
+		if inTimeSpan(start, end, csr.CreationTimestamp.Time) {
+			recentlyPending++
+		} else if afterTime(end, csr.CreationTimestamp.Time) {
+			oldPending++
 		}
 	}
 
-	return pending
+	return recentlyPending, oldPending
 }
 
 // getServingCert fetches the node by the given name and attempts to connect to

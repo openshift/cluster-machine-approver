@@ -2747,9 +2747,10 @@ func TestRecentlyPendingCSRs(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		csrs          []certificatesv1.CertificateSigningRequest
-		expectPending int
+		name             string
+		csrs             []certificatesv1.CertificateSigningRequest
+		expectPending    int
+		expectOldPending int
 	}{
 		{
 			name:          "recently pending csr",
@@ -2762,9 +2763,10 @@ func TestRecentlyPendingCSRs(t *testing.T) {
 			expectPending: 0,
 		},
 		{
-			name:          "pending past approval time",
-			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pastApprovalTime, pendingCSR)},
-			expectPending: 0,
+			name:             "pending past approval time",
+			csrs:             []certificatesv1.CertificateSigningRequest{createdAt(pastApprovalTime, pendingCSR)},
+			expectPending:    0,
+			expectOldPending: 1,
 		},
 		{
 			name:          "pending before approval time",
@@ -2783,14 +2785,19 @@ func TestRecentlyPendingCSRs(t *testing.T) {
 				createdAt(preApprovalTime, pendingCSR),
 				createdAt(pastApprovalTime, pendingCSR),
 			},
-			expectPending: 2,
+			expectPending:    2,
+			expectOldPending: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if pending := recentlyPendingCSRs(tt.csrs); pending != tt.expectPending {
+			pending, oldPending := pendingCSRsByAge(tt.csrs)
+			if pending != tt.expectPending {
 				t.Errorf("Expected %v pending CSRs, got: %v", tt.expectPending, pending)
+			}
+			if oldPending != tt.expectOldPending {
+				t.Errorf("Expected %v old pending CSRs, got: %v", tt.expectOldPending, oldPending)
 			}
 		})
 	}

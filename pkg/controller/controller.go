@@ -164,10 +164,11 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, csrs *certificatesv1.CertificateSigningRequestList) bool {
 	maxPending := getMaxPending(machines)
 	atomic.StoreUint32(&MaxPendingCSRs, uint32(maxPending))
-	pending := recentlyPendingCSRs(csrs.Items)
-	atomic.StoreUint32(&PendingCSRs, uint32(pending))
-	if pending > maxPending {
-		klog.Errorf("%v: Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", csrName, pending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
+	recentlyPending, oldPending := pendingCSRsByAge(csrs.Items)
+	atomic.StoreUint32(&PendingCSRs, uint32(recentlyPending))
+	atomic.StoreUint32(&OldPendingCSRs, uint32(oldPending))
+	if recentlyPending > maxPending {
+		klog.Errorf("%v: Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", csrName, recentlyPending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
 		return true
 	}
 
