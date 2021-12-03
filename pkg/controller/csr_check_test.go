@@ -1,10 +1,16 @@
 package controller
 
 import (
+	"bytes"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"net/url"
 	"reflect"
@@ -25,106 +31,10 @@ import (
 	machinev1 "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 )
 
-/*
-  {
-    "hosts": [
-        "node1",
-        "node1.local",
-        "10.0.0.1",
-        "127.0.0.1"
-    ],
-    "CN": "system:node:test",
-    "key": {
-        "algo": "rsa",
-        "size": 2048
-    },
-    "names": [{
-        "O": "system:nodes"
-    }]
-  }
-
-	Generate CSR
-	$ cfssl genkey test_csr.json | cfssljson -bare ca
-
-	Generate server certificate
-	$ cfssl gencert -ca=ca.pem -ca-key=ca-key.pem test_csr.json | cfssljson -bare server
-
-	Generate root certificate
-	$ cfssl gencert -initca test_csr.json | cfssljson -bare root
-*/
+// The following global test variables are populated within the init func
+var serverCertGood, serverKeyGood, rootCertGood string
 
 const (
-	serverCertGood = `-----BEGIN CERTIFICATE-----
-MIIDfTCCAmWgAwIBAgIUbAsUQZRjkLyGoY50hiYPohSchAYwDQYJKoZIhvcNAQEL
-BQAwMjEVMBMGA1UEChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9k
-ZTp0ZXN0MB4XDTIwMTExODIwMTIwMFoXDTIxMTExODIwMTIwMFowMjEVMBMGA1UE
-ChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9kZTp0ZXN0MIIBIjAN
-BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9w75bQ5bUympW/LYWWE91Lpzc7kJ
-e4MYmJqr8Sa8rCsSykdHsfWpn0oiW28QQY3k1fgB+WeA3FhOoiDsa5anprhJWqDV
-gaAW2jwPq6D2oi3c6YSa80q8n1oTT3LzkLKnDLQx/xwGJDgnXrLfEOqDuy4z5RvS
-wOO5CmTQZRt+FieeVHKLuZhDOE0CJ62HclntNj04IM+sbeHhozz1iWrLz2C3Pm0F
-LIIfmpA2Cb3pp9eUknyxDAur8JatIM3CoEoWEW9wHeqhu8/TkNKGfUdocT88tq4r
-+0x4wedQ7vXikBAlF2VBBwVj86jrhDgi2wn4ErEp9dQ322rvRoo5EYFYCQIDAQAB
-o4GKMIGHMA4GA1UdDwEB/wQEAwIFoDAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYB
-BQUHAwIwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQUijDhx2Lznrf2OAw+x2d08pVm
-Qa0wKQYDVR0RBCIwIIIFbm9kZTGCC25vZGUxLmxvY2FshwQKAAABhwR/AAABMA0G
-CSqGSIb3DQEBCwUAA4IBAQARJOrMYBokpT/mj1XXN1Z0rpiYcJjzbqmF6BTqn/Z0
-AuW9zJJcAKajcRx7x97LClajvAH7j0qXfw6PJYoFOukJyJzVD93hawNXWBy0xkYg
-u+Xyf2bwoLCS+gHoyXqknOFgaMNCtBBum1+CxxalANfZmeDHbS7ZXcP7u8KAmHJ4
-kqkTSAhi7WeiYlXRQ0YoXy9NSQ25yXrw1Z2PPJbWUZu9jrBHUi9l2EUbcudujxHt
-87fbFaRLZzhRrFqmDK73fhQ3f5ajiw5uwIvVdy3JIXnfau9+ZKJ8aR7Mj74tTecV
-jPZ67rYFh/lRj5PMorF///1taHNXCaR905Wx9WxzPLK/
------END CERTIFICATE-----
-`
-	serverKeyGood = `-----BEGIN RSA PRIVATE KEY-----
-MIIEpQIBAAKCAQEA9w75bQ5bUympW/LYWWE91Lpzc7kJe4MYmJqr8Sa8rCsSykdH
-sfWpn0oiW28QQY3k1fgB+WeA3FhOoiDsa5anprhJWqDVgaAW2jwPq6D2oi3c6YSa
-80q8n1oTT3LzkLKnDLQx/xwGJDgnXrLfEOqDuy4z5RvSwOO5CmTQZRt+FieeVHKL
-uZhDOE0CJ62HclntNj04IM+sbeHhozz1iWrLz2C3Pm0FLIIfmpA2Cb3pp9eUknyx
-DAur8JatIM3CoEoWEW9wHeqhu8/TkNKGfUdocT88tq4r+0x4wedQ7vXikBAlF2VB
-BwVj86jrhDgi2wn4ErEp9dQ322rvRoo5EYFYCQIDAQABAoIBAQD2LSae43pekJng
-NEgeL8YjrbIS8qMfPo8IqL6B6b6As97iTkqDai2duoonn7CMEa6fAqQ890SwyxF3
-feT2g8UEXIdDVhXJN1LuHIDk3NxE1/xTd73KhYMUKfYp6XoHiezovLlA4ZTBDG82
-bnfVbEjc//nX5nSHnaIpWDFLPizSNqzJymPlD3hOetPKzZ8e4bjnkil9cTpg4QO6
-3xruCTEmGwG1ApYp7XAE32r2MCQalOf8pKIR+6IvTA1mYZd70geLmj/bbN/Zi6f6
-dGpRzFr2Jx0yPExebjds6UqcdIRxur6w9ya++nmBrKvrGzPjee3NH2rk2ZKySKQ8
-JTtP4J+BAoGBAP/5Nrv/TeCQIaRtYskZrfna8ugXbfYPLSMo+qKvIcpEwFEuaxkH
-K5G7a5UnkJIIWCGUKhQmsCb6amz8SmuH/SmZXEavMMDTIWriOZ1YA5yR4oc+tO1a
-UdM33qrVbMfH8g6kJKRXML1yxoqbSv6RSye1FlfqHp0lcqpQZ1bcVHexAoGBAPcV
-hi+8OMdDyd64EE07N0xmCgd3um1LFn7Wc2W3UA3Fdcp4YJ8pwfmx+BN/48hhZuwa
-AC8o3UHgLv/ypveoBjjA36ARBt20WETByfwJPp5md5mYQSFzsdhsN8t80VagVrGM
-tO/ZZEG5AkhazKm7hYz4NlGOfyyf6tw9CPIkkdPZAoGBAL2hO1pExcXSIQo1+xPu
-EUPjX0ZvbQf3sEG27w6sXYUCL9M0ZyTweeeJiCbEW8bDpb6ijBXHn4IQy90Xfm5x
-HSy/L2wyBxUilEQheftFo89PCBmXa+PWoH2wiyXV3LOYPYt5MKgK69G9gLZYW1OC
-AcJV1kqk568VegAQdq4TpgPRAoGBAPHY66NFxP2maK3L1IkD8TiimCZ/Fsdru/Ui
-y4lASOdx473u3gRsxyU1AfF0OO0mCawINy3x/cBBQz/br3qxyIU8pKb0g5f2sn96
-f85m7hf1jBOXaAjqSaXhJyvSXMVB5Bmd9GzgiLWb9ZQE7Fcm6a32NpTVub1gOm6g
-f2UkTmjhAoGAMr7qeQ1AJrEg5pYEaeYeQ9jvxxvgTOO6Q6gi7K3D/BUSbHukZ8Kd
-keiTZ5+55Pi21jvHNXE/Rn9RrJHkryoPCqnRIuSFigrUMBMiloCzL2j0jCIzbw5n
-iWrekSBGrM0WHjrzgzLwIQY1nuXUx9TZgw+tgXTFt9Grgz0L7NmSyJI=
------END RSA PRIVATE KEY-----
-`
-	rootCertGood = `-----BEGIN CERTIFICATE-----
-MIIDSzCCAjOgAwIBAgIUUEs81eUj5S9T5cglpZ0gQV06Y9owDQYJKoZIhvcNAQEL
-BQAwMjEVMBMGA1UEChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9k
-ZTp0ZXN0MB4XDTIwMTExODIwMTEwMFoXDTI1MTExNzIwMTEwMFowMjEVMBMGA1UE
-ChMMc3lzdGVtOm5vZGVzMRkwFwYDVQQDExBzeXN0ZW06bm9kZTp0ZXN0MIIBIjAN
-BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAukG4TvbrMbVklA2nLmK0T7+SygWR
-Yebsd0vJMWkw87+zxkYY0tEo+y5ijHXucb1S3m4mGulmzxP1KQI/0RDuba1HhekA
-aOxy2TZWYhtQUxCHbrREz3b+OBbDkf2Dzp7Qo6J3l7fYBRCD/AnTzSCaK5LwzmH0
-X3TCJnrLBIf8gFrqAHsCXadNV3JQ2Iip6Gjs8VCqnZHS/oFhXpKiMnrB0IMpC6F2
-1/T4Uoe+vyWoUTZQTAjZVBcIDLp3r8c6FnmF5YjouWafNVfbttVczNpuSt/3YxXL
-b2P/EQfb8QniNUXnkxSNwOpZx6QO2PZHSSBWcW+q+EUeFXsInl41dK5avwIDAQAB
-o1kwVzAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQU
-Hrk7KIVyk8Iio60VmtNhBX8NoWAwFQYDVR0RBA4wDIcECgAAAYcEfwAAATANBgkq
-hkiG9w0BAQsFAAOCAQEAc8MxeqY7IVOfoDrbpeFAmZlmG93WE8Aolzj9rN0ZfQYr
-SuNL644WQVUS0JcJOWpXYP7IBIh1dTSx3eOBnN4Et8t+grKJLMjtGC4+4Q08tOT+
-+wmy8vKRk6YDxR38nmhluEUFLdtMCdNsDTgXdOx5r/jE+9b+HCMaTRuejt2rxgNg
-NxxCBFzlUF3qm11AGXU37RobjPciHu+NxLnC7OWvu1xUawf1qryJhd0fahM+ZTQ0
-QweKOXA34JfqaTjLPHob/xaeBZ2zk8JuiPeHnuXUfiBPgkCKfUlidPQH7G2B9QNn
-mhTXEUnJbr+N31t6dGQdnvk88+a7QA1y4ypl9XolWA==
------END CERTIFICATE-----
-`
 	differentCert = `-----BEGIN CERTIFICATE-----
 MIIB6zCCAZGgAwIBAgIUNukOeYC/OJTuAHe8x0dZGxo/UPcwCgYIKoZIzj0EAwIw
 SDELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1TYW4gRnJhbmNp
@@ -425,6 +335,91 @@ func init() {
 	now = clock.NewFakePassiveClock(baseTime).Now
 	networkv1.AddToScheme(scheme.Scheme)
 	configv1.AddToScheme(scheme.Scheme)
+
+	// Genereate a CA cert valid for the next 12 hours
+	rootCert, rootKey, err := generateCertKeyPair(12*time.Hour, nil, nil, "system:node:test")
+	if err != nil {
+		panic(err)
+	}
+
+	// Sign a serving cert based on the previous CA cert
+	serverCert, serverKey, err := generateCertKeyPair(time.Hour, rootCert, rootKey, "system:node:test", "node1", "node1.local")
+	if err != nil {
+		panic(err)
+	}
+
+	rootCertGood = string(rootCert)
+	serverCertGood = string(serverCert)
+	serverKeyGood = string(serverKey)
+}
+
+func generateCertKeyPair(duration time.Duration, parentCertPEM, parentKeyPEM []byte, commonName string, otherNames ...string) ([]byte, []byte, error) {
+	var err error
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	keyBytes, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	notBefore := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"system:nodes"},
+			CommonName:   commonName,
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(duration),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:              otherNames,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")},
+		IsCA:                  parentCertPEM == nil,
+		BasicConstraintsValid: true, // Required, else IsCA is ignored
+	}
+
+	parentCert := &template
+	var signerKey crypto.PrivateKey // Key must be a PrivateKey type, but this is an alias for interface{}
+	signerKey = priv
+	if parentCertPEM != nil {
+		certificates, err := tls.X509KeyPair(parentCertPEM, parentKeyPEM)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		signerKey = certificates.PrivateKey
+
+		parentCert, err = x509.ParseCertificate(certificates.Certificate[0])
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	certBytes, err := x509.CreateCertificate(rand.Reader, &template, parentCert, &priv.PublicKey, signerKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	certOut := new(bytes.Buffer)
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes}); err != nil {
+		return nil, nil, err
+	}
+
+	keyOut := new(bytes.Buffer)
+	if err := pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes}); err != nil {
+		return nil, nil, err
+	}
+
+	return certOut.Bytes(), keyOut.Bytes(), nil
 }
 
 func Test_authorizeCSR(t *testing.T) {
@@ -2391,8 +2386,8 @@ func Test_authorizeCSR(t *testing.T) {
 }
 
 func TestAuthorizeServingRenewal(t *testing.T) {
-	presetTimeCorrect := time.Date(2020, 11, 19, 0, 0, 0, 0, time.UTC)
-	presetTimeExpired := time.Date(2020, 11, 18, 0, 0, 0, 0, time.UTC)
+	presetTimeCorrect := time.Now()
+	presetTimeExpired := time.Now().Add(-24 * time.Hour)
 
 	tests := []struct {
 		name        string
@@ -2423,7 +2418,7 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 			currentCert: parseCert(t, serverCertGood),
 			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
 			time:        presetTimeExpired,
-			wantErr:     "x509: certificate has expired or is not yet valid: current time 2020-11-18T00:00:00Z is before 2020-11-18T20:12:00Z",
+			wantErr:     fmt.Sprintf("x509: certificate has expired or is not yet valid: current time %s is before %s", presetTimeExpired.Format(time.RFC3339), presetTimeCorrect.Format(time.RFC3339)),
 		},
 		{
 			name:        "SAN list differs",
@@ -2484,8 +2479,8 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 }
 
 func TestAuthorizeServingRenewalWithEgressIPs(t *testing.T) {
-	presetTimeCorrect := time.Date(2020, 11, 19, 0, 0, 0, 0, time.UTC)
-	presetTimeExpired := time.Date(2020, 11, 18, 0, 0, 0, 0, time.UTC)
+	presetTimeCorrect := time.Now()
+	presetTimeExpired := time.Now().Add(-24 * time.Hour)
 	testNodeName := "test"
 
 	tests := []struct {
@@ -2523,7 +2518,7 @@ func TestAuthorizeServingRenewalWithEgressIPs(t *testing.T) {
 			currentCert: parseCert(t, serverCertGood),
 			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
 			time:        presetTimeExpired,
-			wantErr:     "x509: certificate has expired or is not yet valid: current time 2020-11-18T00:00:00Z is before 2020-11-18T20:12:00Z",
+			wantErr:     fmt.Sprintf("x509: certificate has expired or is not yet valid: current time %s is before %s", presetTimeExpired.Format(time.RFC3339), presetTimeCorrect.Format(time.RFC3339)),
 		},
 		{
 			name:        "With additional unknown IP address",
