@@ -47,11 +47,11 @@ automatically approves all CSRs.  This bootstrap service will end up approving
 the CSRs for the control plane nodes, while `cluster-machine-approver` will
 take over for future new CSRs from worker nodes.
 
-### Disabling Node Client CSR Approvals
+### Disabling Node CSR Approvals
 
-It is possible to disable node client CSR approvals completely.  This is done
-using a `ConfigMap` resource, as shown in [this PR
-comment](https://github.com/openshift/cluster-machine-approver/pull/26#issuecomment-492782189).
+It is possible to disable node client and server CSR approvals completely. This is done
+using a `ConfigMap` resource, as shown in in the example below. The `nodeClientCert` and 
+`nodeServerCert` options can be used indepedently or concurrently.
 
 ```yaml
 apiVersion: v1
@@ -62,6 +62,8 @@ metadata:
 data:
   config.yaml: |-
     nodeClientCert:
+      disabled: true
+    nodeServerCert:
       disabled: true
 ```
 

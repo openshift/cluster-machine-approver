@@ -11,9 +11,14 @@ import (
 
 type ClusterMachineApproverConfig struct {
 	NodeClientCert NodeClientCert `json:"nodeClientCert,omitempty"`
+	NodeServerCert NodeServerCert `json:"nodeServerCert,omitempty"`
 }
 
 type NodeClientCert struct {
+	Disabled bool `json:"disabled,omitempty"`
+}
+
+type NodeServerCert struct {
 	Disabled bool `json:"disabled,omitempty"`
 }
 

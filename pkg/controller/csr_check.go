@@ -147,7 +147,7 @@ func authorizeCSR(
 
 	if isNodeClientCert(req, csr) {
 		if config.NodeClientCert.Disabled {
-			klog.Errorf("%v: CSR rejected as the flow is disabled", req.Name)
+			klog.Errorf("%v: CSR rejected as the node client cert flow is disabled", req.Name)
 			return false, fmt.Errorf("CSR %s for node client cert rejected as the flow is disabled", req.Name)
 		}
 		return authorizeNodeClientCSR(c, machines, req, csr)
@@ -155,6 +155,11 @@ func authorizeCSR(
 
 	klog.Infof("%v: CSR does not appear to be client csr", req.Name)
 	// node serving cert validation after this point
+
+	if config.NodeServerCert.Disabled {
+		klog.Errorf("%v: CSR rejected as the node server cert flow is disabled", req.Name)
+		return false, fmt.Errorf("CSR %s for node server cert rejected as the flow is disabled", req.Name)
+	}
 
 	nodeAsking, err := validateCSRContents(req, csr)
 	if nodeAsking == "" || err != nil {

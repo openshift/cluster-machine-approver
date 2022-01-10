@@ -534,6 +534,61 @@ func Test_authorizeCSR(t *testing.T) {
 			authorize: true,
 		},
 		{
+			name: "serving cert auto approval disabled",
+			args: args{
+				config: ClusterMachineApproverConfig{
+					NodeServerCert: NodeServerCert{
+						Disabled: true,
+					},
+				},
+				machines: []machinehandlerpkg.Machine{
+					{
+						Status: machinehandlerpkg.MachineStatus{
+							NodeRef: &corev1.ObjectReference{
+								Name: "test",
+							},
+							Addresses: []corev1.NodeAddress{
+								{
+									Type:    corev1.NodeInternalIP,
+									Address: "127.0.0.1",
+								},
+								{
+									Type:    corev1.NodeExternalIP,
+									Address: "10.0.0.1",
+								},
+								{
+									Type:    corev1.NodeInternalDNS,
+									Address: "node1.local",
+								},
+								{
+									Type:    corev1.NodeExternalDNS,
+									Address: "node1",
+								},
+							},
+						},
+					},
+				},
+				req: &certificatesv1.CertificateSigningRequest{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-node-csr"},
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr: goodCSR,
+			},
+			wantErr:   "CSR test-node-csr for node server cert rejected as the flow is disabled",
+			authorize: false,
+		},
+		{
 			name: "bad-csr",
 			args: args{
 				csr: emptyCSR,
@@ -2218,6 +2273,40 @@ func Test_authorizeCSR(t *testing.T) {
 				ca:  []*x509.Certificate{parseCert(t, rootCertGood)},
 			},
 			authorize: true,
+		},
+		{
+			name: "ignore invalid server cert when auto approval disabled",
+			args: args{
+				config: ClusterMachineApproverConfig{
+					NodeServerCert: NodeServerCert{
+						Disabled: true,
+					},
+				},
+				node: withPort(defaultPort+1, withName("test", defaultNode())),
+				req: &certificatesv1.CertificateSigningRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "renew",
+						CreationTimestamp: creationTimestamp(10 * time.Minute),
+					},
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr:           goodCSR,
+				ca:            []*x509.Certificate{parseCert(t, differentCert)},
+				kubeletServer: fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort+2), differentCert, differentKey),
+			},
+			wantErr:   "CSR renew for node server cert rejected as the flow is disabled",
+			authorize: false,
 		},
 		{
 			name: "successfull fallback to fresh approval from incorrect server cert",
