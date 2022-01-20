@@ -135,7 +135,13 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 		return reconcile.Result{}, fmt.Errorf("Failed to list machines: %w", err)
 	}
 
-	if offLimits := reconcileLimits(req.Name, machines, csrs); offLimits {
+	nodes := &corev1.NodeList{}
+	if err := m.NodeClient.List(ctx, nodes); err != nil {
+		klog.Errorf("%v: Failed to list Nodes: %v", req.Name, err)
+		return reconcile.Result{}, fmt.Errorf("Failed to get Nodes: %w", err)
+	}
+
+	if offLimits := reconcileLimits(req.Name, machines, nodes, csrs); offLimits {
 		// Stop all reconciliation
 		return reconcile.Result{}, nil
 	}
@@ -151,7 +157,7 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 			// When an error occurs, we requeue and so update the limits on the
 			// next reconcile.
 			// Don't use a cached client here else we may not have up to date CSRs.
-			return reconcile.Result{}, reconcileLimitsUncached(m.NodeRestCfg, csr.Name, machines)
+			return reconcile.Result{}, reconcileLimitsUncached(m.NodeRestCfg, csr.Name, machines, nodes)
 		}
 	}
 
@@ -161,8 +167,8 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // reconcileLimits will short circut logic if number of pending CSRs is exceeding limit
-func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, csrs *certificatesv1.CertificateSigningRequestList) bool {
-	maxPending := getMaxPending(machines)
+func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, nodes *corev1.NodeList, csrs *certificatesv1.CertificateSigningRequestList) bool {
+	maxPending := getMaxPending(machines, nodes)
 	atomic.StoreUint32(&MaxPendingCSRs, uint32(maxPending))
 	pending := recentlyPendingCSRs(csrs.Items)
 	atomic.StoreUint32(&PendingCSRs, uint32(pending))
@@ -177,7 +183,7 @@ func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, csrs 
 // reconcileLimitsUncached is used to update the limits using an uncached certificates list.
 // This is used at the end of the approval process to ensure that the limits (and therefore)
 // the metrics are always up to date.
-func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machinehandlerpkg.Machine) error {
+func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machinehandlerpkg.Machine, nodes *corev1.NodeList) error {
 	certClient, err := certificatesv1client.NewForConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("could not initialise certificates client: %v", err)
@@ -188,7 +194,7 @@ func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machin
 		return fmt.Errorf("could not list CSRs: %v", err)
 	}
 
-	reconcileLimits(csrName, machines, certificates)
+	reconcileLimits(csrName, machines, nodes, certificates)
 	return nil
 }
 
@@ -287,6 +293,13 @@ func parseCSR(obj *certificatesv1.CertificateSigningRequest) (*x509.CertificateR
 	return x509.ParseCertificateRequest(block.Bytes)
 }
 
-func getMaxPending(machines []machinehandlerpkg.Machine) int {
-	return len(machines) + maxDiffBetweenPendingCSRsAndMachinesCount
+func getMaxPending(machines []machinehandlerpkg.Machine, nodes *corev1.NodeList) int {
+	return max(len(machines), len(nodes.Items)) + maxDiffBetweenPendingCSRsAndMachinesCount
+}
+
+func max(x, y int) int {
+	if x < y {
+		return y
+	}
+	return x
 }

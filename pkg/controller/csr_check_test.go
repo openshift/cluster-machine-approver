@@ -2885,19 +2885,50 @@ func creationTimestamp(delta time.Duration) metav1.Time {
 }
 
 func TestGetMaxPending(t *testing.T) {
-	ml := []machinehandlerpkg.Machine{
+	testCases := []struct {
+		name        string
+		machines    []machinehandlerpkg.Machine
+		nodes       []corev1.Node
+		expectedMax int
+	}{
 		{
-			Status: machinehandlerpkg.MachineStatus{},
+			name: "with more machines than nodes",
+			machines: []machinehandlerpkg.Machine{
+				{},
+				{},
+				{},
+			},
+			nodes: []corev1.Node{
+				{},
+				{},
+			},
+			expectedMax: 3 + maxDiffBetweenPendingCSRsAndMachinesCount,
 		},
 		{
-			Status: machinehandlerpkg.MachineStatus{},
+			name: "with more nodes than machines",
+			machines: []machinehandlerpkg.Machine{
+				{},
+				{},
+				{},
+			},
+			nodes: []corev1.Node{
+				{},
+				{},
+				{},
+				{},
+			},
+			expectedMax: 4 + maxDiffBetweenPendingCSRsAndMachinesCount,
 		},
 	}
 
-	res := getMaxPending(ml)
-	expected := len(ml) + maxDiffBetweenPendingCSRsAndMachinesCount
-	if res != expected {
-		t.Errorf("getMaxPending returned incorrect value: %v, expect: %v", res, expected)
+	for _, tc := range testCases {
+		nodeList := &corev1.NodeList{
+			Items: tc.nodes,
+		}
+		res := getMaxPending(tc.machines, nodeList)
+		if res != tc.expectedMax {
+			t.Errorf("getMaxPending returned incorrect value: %v, expect: %v", res, tc.expectedMax)
+		}
 	}
 }
 
