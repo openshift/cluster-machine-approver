@@ -47,6 +47,19 @@ automatically approves all CSRs.  This bootstrap service will end up approving
 the CSRs for the control plane nodes, while `cluster-machine-approver` will
 take over for future new CSRs from worker nodes.
 
+### Understanding node join
+
+The default OCP flow uses CoreOS (e.g. RHEL CoreOS), which is provisioned via
+Ignition.  All the initial node configuration is rendered into Ignition
+by the [MCO](https://github.com/openshift/machine-config-operator/).  Further,
+before kubelet even starts, the OS is upgraded to the latest image.  For
+more information on this, see:
+https://github.com/openshift/machine-config-operator/blob/master/docs/OSUpgrades.md
+
+And specifically for the initial kubelet config, see [cluster_server.go](https://github.com/openshift/machine-config-operator/blob/0476b259ab6895e7aaca237581bc19b4d4610e12/pkg/server/cluster_server.go#L58)
+which is part of the "Machine Config Server" that provides Ignition
+when the node requests it on the first boot.
+
 ### Disabling Node Client CSR Approvals
 
 It is possible to disable node client CSR approvals completely.  This is done
