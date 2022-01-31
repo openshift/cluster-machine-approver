@@ -2386,8 +2386,8 @@ func Test_authorizeCSR(t *testing.T) {
 }
 
 func TestAuthorizeServingRenewal(t *testing.T) {
-	presetTimeCorrect := time.Now()
-	presetTimeExpired := time.Now().Add(-24 * time.Hour)
+	presetTimeCorrect := time.Now().UTC()
+	presetTimeExpired := time.Now().UTC().Add(-24 * time.Hour)
 
 	tests := []struct {
 		name        string
@@ -2479,8 +2479,8 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 }
 
 func TestAuthorizeServingRenewalWithEgressIPs(t *testing.T) {
-	presetTimeCorrect := time.Now()
-	presetTimeExpired := time.Now().Add(-24 * time.Hour)
+	presetTimeCorrect := time.Now().UTC()
+	presetTimeExpired := time.Now().UTC().Add(-24 * time.Hour)
 	testNodeName := "test"
 
 	tests := []struct {
