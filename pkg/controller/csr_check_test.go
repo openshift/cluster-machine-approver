@@ -467,6 +467,41 @@ func Test_authorizeCSR(t *testing.T) {
 		return hostSubnet
 	}
 
+	var makeMachine = func(nodeName string, addresses ...corev1.NodeAddress) machinehandlerpkg.Machine {
+		if len(addresses) == 0 {
+			addresses = []corev1.NodeAddress{
+				{
+					Type:    corev1.NodeInternalIP,
+					Address: "127.0.0.1",
+				},
+				{
+					Type:    corev1.NodeExternalIP,
+					Address: "10.0.0.1",
+				},
+				{
+					Type:    corev1.NodeInternalDNS,
+					Address: "node1.local",
+				},
+				{
+					Type:    corev1.NodeExternalDNS,
+					Address: "node1",
+				},
+			}
+		}
+		var nodeRef *corev1.ObjectReference
+		if nodeName != "" {
+			nodeRef = &corev1.ObjectReference{
+				Name: nodeName,
+			}
+		}
+		return machinehandlerpkg.Machine{
+			Status: machinehandlerpkg.MachineStatus{
+				NodeRef:   nodeRef,
+				Addresses: addresses,
+			},
+		}
+	}
+
 	type args struct {
 		config        ClusterMachineApproverConfig
 		machines      []machinehandlerpkg.Machine
@@ -487,33 +522,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "ok",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -545,33 +554,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "no-node-prefix",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -594,33 +577,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "only-node-prefix",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -670,33 +627,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "missing-groups-1",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -718,33 +649,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "missing-groups-2",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -766,33 +671,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "extra-group",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -816,33 +695,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "wrong-group",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -865,33 +718,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usages-missing",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -912,33 +739,7 @@ func Test_authorizeCSR(t *testing.T) {
 		}, {
 			name: "usages-missing",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -961,33 +762,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usages-missing-1",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1009,33 +784,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usage-missing-2",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1057,33 +806,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "usage-extra",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1107,33 +830,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-cn",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1156,33 +853,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-cn-2",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1205,33 +876,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-no-o",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1254,33 +899,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "csr-extra-addr",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1304,31 +923,12 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "csr-san-ip-mismatch",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.2",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
+					makeMachine("test", []corev1.NodeAddress{
+						{corev1.NodeInternalIP, "127.0.0.1"},
+						{corev1.NodeExternalIP, "10.0.0.2"},
+						{corev1.NodeExternalDNS, "node1"},
+						{corev1.NodeExternalDNS, "node1.local"},
+					}...),
 				},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
@@ -1353,31 +953,12 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "csr-san-dns-mismatch",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node2",
-								},
-							},
-						},
-					},
+					makeMachine("test", []corev1.NodeAddress{
+						{corev1.NodeInternalIP, "127.0.0.1"},
+						{corev1.NodeExternalIP, "10.0.0.1"},
+						{corev1.NodeExternalDNS, "node1.local"},
+						{corev1.NodeExternalDNS, "node2"},
+					}...),
 				},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
@@ -1403,26 +984,8 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "tigers",
-								},
-							},
-						},
-					},
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "tigers"}),
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
@@ -1448,16 +1011,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client extra O",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "bear",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "bear"}),
 				},
 				node: withName("bear", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1484,16 +1038,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client with DNS",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "monkey",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "monkey"}),
 				},
 				node: withName("monkey", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1520,16 +1065,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but extra usage",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1557,16 +1093,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but wrong usage",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1593,16 +1120,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but missing usage",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1628,16 +1146,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but wrong CN",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "zebra",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "zebra"}),
 				},
 				node: withName("zebra", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1664,16 +1173,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but wrong user",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1701,16 +1201,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but wrong user group",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1739,16 +1230,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but empty name",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1776,16 +1258,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but node exists",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1812,16 +1285,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but missing machine",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeExternalDNS, "panda"}),
 				},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
@@ -1847,17 +1311,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but machine has node ref",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{Name: "other"},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("other", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
@@ -1888,26 +1342,8 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "tigers",
-								},
-							},
-						},
-					},
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "panda",
-								},
-							},
-						},
-					},
+					makeMachine("other", corev1.NodeAddress{corev1.NodeInternalDNS, "tigers"}),
+					makeMachine("other", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1935,16 +1371,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good with proper timing",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "tigers",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "tigers"}),
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(2 * time.Minute),
@@ -1987,16 +1414,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good with proper timing 2",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "tigers",
-								},
-							},
-						},
-					},
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "tigers"}),
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
@@ -2039,16 +1457,7 @@ func Test_authorizeCSR(t *testing.T) {
 			name: "client good but CSR too early",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "tigers",
-								},
-							},
-						},
-					},
+					makeMachine("other", corev1.NodeAddress{corev1.NodeInternalDNS, "tigers"}),
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							CreationTimestamp: creationTimestamp(3 * time.Minute),
@@ -2169,33 +1578,7 @@ func Test_authorizeCSR(t *testing.T) {
 		{
 			name: "successfull fallback to fresh approval",
 			args: args{
-				machines: []machinehandlerpkg.Machine{
-					{
-						Status: machinehandlerpkg.MachineStatus{
-							NodeRef: &corev1.ObjectReference{
-								Name: "test",
-							},
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeInternalIP,
-									Address: "127.0.0.1",
-								},
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: "10.0.0.1",
-								},
-								{
-									Type:    corev1.NodeInternalDNS,
-									Address: "node1.local",
-								},
-								{
-									Type:    corev1.NodeExternalDNS,
-									Address: "node1",
-								},
-							},
-						},
-					},
-				},
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "renew",
