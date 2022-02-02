@@ -10,10 +10,12 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/diff"
 	"math/big"
 	"net"
 	"net/url"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -420,6 +422,125 @@ func generateCertKeyPair(duration time.Duration, parentCertPEM, parentKeyPEM []b
 	}
 
 	return certOut.Bytes(), keyOut.Bytes(), nil
+}
+
+func createCsr(commonName string, organizations []string, ipAddressess []net.IP, dnsNames []string) string {
+	defaultOrganizations := []string{"system:nodes"}
+	defaultIPAdresses := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")}
+	defaultDnsNames := []string{"node1", "node1.local"}
+
+	if organizations == nil {
+		organizations = defaultOrganizations
+	}
+
+	if ipAddressess == nil {
+		ipAddressess = defaultIPAdresses
+	}
+
+	if dnsNames == nil {
+		dnsNames = defaultDnsNames
+	}
+
+	keyBytes, _ := rsa.GenerateKey(rand.Reader, 2048)
+	subj := pkix.Name{
+		Organization: organizations,
+		CommonName:   commonName,
+	}
+
+	template := x509.CertificateRequest{
+		Subject:            subj,
+		SignatureAlgorithm: x509.SHA256WithRSA,
+		IPAddresses:        ipAddressess,
+		DNSNames:           dnsNames,
+	}
+	csrOut := new(bytes.Buffer)
+
+	csrBytes, _ := x509.CreateCertificateRequest(rand.Reader, &template, keyBytes)
+	pem.Encode(csrOut, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+	return csrOut.String()
+}
+
+/// Temporary test for ensure that createCsr function creates csrs with same attributes as constants have in this file
+func Test_csrGeneration(t *testing.T) {
+
+	type csrTestCase struct {
+		subjOkToDiff        bool
+		name                string
+		encodedGeneratedCsr string
+		encodedConstantCsr  string
+	}
+
+	generatedGoodCsr := createCsr("system:node:test", nil, nil, nil)
+	generatedExtraAddr := createCsr("system:node:test", nil, []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1"), net.ParseIP("99.0.1.1")}, nil)
+	generatedOtherName := createCsr("system:node:foobar", nil, nil, nil)
+	generatedNoNamePrefix := createCsr("test", nil, nil, nil)
+	generatedNoGroup := createCsr("system:node:test", []string{}, nil, nil)
+	generatedClientGood := createCsr("system:node:panda", nil, []net.IP{}, []string{})
+	generatedClentExtraO := createCsr("system:node:bear", []string{"bamboo", "system:nodes"}, []net.IP{}, []string{})
+	generatedClientWithDNS := createCsr("system:node:monkey", nil, []net.IP{}, []string{"banana"})
+	generatedClientWrongCN := createCsr("system:notnode:zebra", nil, []net.IP{}, []string{})
+	generatedClientEmptyName := createCsr("system:node:", nil, []net.IP{}, []string{})
+
+	tcs := []csrTestCase{
+		{false, "goodCsr", generatedGoodCsr, goodCSR},
+		{false, "extraAddr", generatedExtraAddr, extraAddr},
+		{false, "otherName", generatedOtherName, otherName},
+		{false, "noNamePrefix", generatedNoNamePrefix, noNamePrefix},
+		{false, "noGroup", generatedNoGroup, noGroup},
+		{false, "clientGood", generatedClientGood, clientGood},
+		{true, "clientExtraO", generatedClentExtraO, clientExtraO},
+		{false, "clientWithDNS", generatedClientWithDNS, clientWithDNS},
+		{false, "clientWrongCN", generatedClientWrongCN, clientWrongCN},
+		{false, "clientEmptyName", generatedClientEmptyName, clientEmptyName},
+	}
+
+	_parseCSR := func(encoded string) *x509.CertificateRequest {
+		block, _ := pem.Decode([]byte(encoded))
+		req, err := x509.ParseCertificateRequest(block.Bytes)
+		if err != nil {
+			t.Error(err)
+		}
+		return req
+	}
+
+	allTrue := func(toCheck ...bool) bool {
+		for _, v := range toCheck {
+			if !v {
+				return false
+			}
+		}
+		return true
+	}
+
+	sortIps := func(ips []net.IP) []net.IP {
+		sort.Slice(ips, func(i, j int) bool {
+			return bytes.Compare(ips[i], ips[j]) < 0
+		})
+		return ips
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			okToDiff := tc.subjOkToDiff
+			name := tc.name
+			generated := tc.encodedGeneratedCsr
+			constant := tc.encodedConstantCsr
+			generatedRequest := _parseCSR(generated)
+			constantRequest := _parseCSR(constant)
+
+			subjectOk := reflect.DeepEqual(generatedRequest.Subject, constantRequest.Subject)
+			ipsOk := reflect.DeepEqual(sortIps(generatedRequest.IPAddresses), sortIps(constantRequest.IPAddresses))
+			dnsOk := reflect.DeepEqual(generatedRequest.DNSNames, constantRequest.DNSNames)
+
+			if !allTrue(subjectOk, ipsOk, dnsOk) {
+				if !okToDiff {
+					t.Errorf("CSR %v ATTRIBTUES DOES NOT MATCH. subjectOk: %v, ipsOk: %v, dnsOk: %v", name, subjectOk, ipsOk, dnsOk)
+				}
+				fmt.Printf("%v Csrs subj is ok to diff, diff:\n", name)
+				fmt.Println(diff.ObjectDiff(generatedRequest.Subject, constantRequest.Subject))
+			}
+		})
+	}
 }
 
 func Test_authorizeCSR(t *testing.T) {
@@ -979,7 +1100,6 @@ func Test_authorizeCSR(t *testing.T) {
 			wantErr:   "could not authorize CSR: exhausted all authorization methods: DNS name 'node1' not in machine names: node1.local node2",
 			authorize: false,
 		},
-
 		{
 			name: "client good",
 			args: args{
