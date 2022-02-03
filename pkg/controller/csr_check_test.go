@@ -37,6 +37,8 @@ var serverCertGood, serverKeyGood, rootCertGood string
 // Generated CRs, are populating within the init func
 var goodCSR, extraAddr, otherName, noNamePrefix, noGroup, clientGood, clientExtraO, clientWithDNS, clientWrongCN, clientEmptyName, emptyCSR string
 
+var presetTimeCorrect, presetTimeExpired time.Time
+
 const (
 	differentCert = `-----BEGIN CERTIFICATE-----
 MIIB6zCCAZGgAwIBAgIUNukOeYC/OJTuAHe8x0dZGxo/UPcwCgYIKoZIzj0EAwIw
@@ -78,6 +80,9 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+
+	presetTimeCorrect = time.Now().UTC()
+	presetTimeExpired = time.Now().UTC().Add(-24 * time.Hour)
 
 	rootCertGood = string(rootCert)
 	serverCertGood = string(serverCert)
@@ -1547,9 +1552,6 @@ func Test_authorizeCSR(t *testing.T) {
 }
 
 func TestAuthorizeServingRenewal(t *testing.T) {
-	presetTimeCorrect := time.Now().UTC()
-	presetTimeExpired := time.Now().UTC().Add(-24 * time.Hour)
-
 	tests := []struct {
 		name        string
 		nodeName    string
@@ -1640,8 +1642,6 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 }
 
 func TestAuthorizeServingRenewalWithEgressIPs(t *testing.T) {
-	presetTimeCorrect := time.Now().UTC()
-	presetTimeExpired := time.Now().UTC().Add(-24 * time.Hour)
 	testNodeName := "test"
 
 	tests := []struct {
