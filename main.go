@@ -45,7 +45,8 @@ const (
 
 func main() {
 	var cliConfig string
-	var APIGroup string
+	var apiGroup string
+	var apiVersion string
 	var managementKubeConfigPath string
 	var machineNamespace string
 	var workloadKubeConfigPath string
@@ -61,7 +62,8 @@ func main() {
 
 	klog.InitFlags(flagSet)
 	flagSet.StringVar(&cliConfig, "config", "", "CLI config")
-	flagSet.StringVar(&APIGroup, "apigroup", "machine.openshift.io", "API group for machines, defaults to machine.openshift.io")
+	flagSet.StringVar(&apiGroup, "apigroup", "machine.openshift.io", "API group for machines, defaults to machine.openshift.io")
+	flagSet.StringVar(&apiVersion, "apiversion", "", "API version for machines, will default to the server preferred version if not set")
 	flagSet.StringVar(&managementKubeConfigPath, "management-cluster-kubeconfig", "", "management kubeconfig path,")
 	flagSet.StringVar(&machineNamespace, "machine-namespace", "", "restrict machine operations to a specific namespace, if not set, all machines will be observed in approval decisions")
 	flagSet.StringVar(&workloadKubeConfigPath, "workload-cluster-kubeconfig", "", "workload kubeconfig path")
@@ -75,7 +77,7 @@ func main() {
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
 	flagSet.Parse(os.Args[1:])
 
-	if err := validateAPIGroup(APIGroup); err != nil {
+	if err := validateapiGroup(apiGroup); err != nil {
 		klog.Fatalf(err.Error())
 	}
 
@@ -164,7 +166,8 @@ func main() {
 		NodeClient:       uncachedWorkloadClient,
 		NodeRestCfg:      workloadConfig,
 		Config:           controller.LoadConfig(cliConfig),
-		APIGroup:         APIGroup,
+		APIGroup:         apiGroup,
+		APIVersion:       apiVersion,
 	}).SetupWithManager(mgr, ctrl.Options{}); err != nil {
 		klog.Fatalf("unable to create CSR controller: %v", err)
 	}
@@ -218,9 +221,9 @@ func createClients(managementConfig, workloadConfig *rest.Config) (*client.Clien
 	return &managementClient, &workloadClient, nil
 }
 
-func validateAPIGroup(apiGroup string) error {
+func validateapiGroup(apiGroup string) error {
 	if apiGroup != capiGroup && apiGroup != mapiGroup {
-		return fmt.Errorf("unsupported APIGroup %s, allowed values %s, %s", apiGroup, capiGroup, mapiGroup)
+		return fmt.Errorf("unsupported apiGroup %s, allowed values %s, %s", apiGroup, capiGroup, mapiGroup)
 	}
 
 	return nil

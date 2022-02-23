@@ -40,8 +40,9 @@ type CertificateApprover struct {
 	MachineRestCfg   *rest.Config
 	MachineNamespace string
 
-	Config   ClusterMachineApproverConfig
-	APIGroup string
+	Config     ClusterMachineApproverConfig
+	APIGroup   string
+	APIVersion string
 }
 
 func (m *CertificateApprover) SetupWithManager(mgr ctrl.Manager, options controller.Options) error {
@@ -122,11 +123,12 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	machineHandler := &machinehandlerpkg.MachineHandler{
-		Client:    m.MachineClient,
-		Config:    m.MachineRestCfg,
-		Ctx:       ctx,
-		APIGroup:  m.APIGroup,
-		Namespace: m.MachineNamespace,
+		Client:     m.MachineClient,
+		Config:     m.MachineRestCfg,
+		Ctx:        ctx,
+		APIGroup:   m.APIGroup,
+		APIVersion: m.APIVersion,
+		Namespace:  m.MachineNamespace,
 	}
 
 	machines, err := machineHandler.ListMachines()

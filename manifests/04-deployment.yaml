@@ -61,6 +61,8 @@ spec:
         command: ["/usr/bin/machine-approver"]
         args:
         - "--config=/var/run/configmaps/config/config.yaml"
+        - "--apigroup=machine.openshift.io"
+        - "--apiversion=v1beta1"
         - "-v=2"
         - "--logtostderr"
         - "--leader-elect=true"

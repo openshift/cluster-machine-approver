@@ -21,11 +21,12 @@ var (
 )
 
 type MachineHandler struct {
-	APIGroup  string
-	Client    client.Client
-	Config    *rest.Config
-	Ctx       context.Context
-	Namespace string
+	APIGroup   string
+	APIVersion string
+	Client     client.Client
+	Config     *rest.Config
+	Ctx        context.Context
+	Namespace  string
 }
 
 type Machine struct {
@@ -39,16 +40,20 @@ type MachineStatus struct {
 
 // ListMachines list all machines using given client
 func (m *MachineHandler) ListMachines() ([]Machine, error) {
-	APIVersion, err := m.getAPIGroupPreferredVersion()
-	if err != nil {
-		return nil, err
+	apiVersion := m.APIVersion
+	if apiVersion == "" {
+		var err error
+		apiVersion, err = m.getAPIGroupPreferredVersion()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	unstructuredMachineList := &unstructured.UnstructuredList{}
 	unstructuredMachineList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   m.APIGroup,
 		Kind:    "MachineList",
-		Version: APIVersion,
+		Version: apiVersion,
 	})
 	listOpts := make([]client.ListOption, 0)
 	if m.Namespace != "" {

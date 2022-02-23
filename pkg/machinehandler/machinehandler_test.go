@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -108,13 +109,14 @@ func Test_authorizeCSR(t *testing.T) {
 	capiMachine2 := createUnstructuredMachine("cluster.x-k8s.io/v1alpha4", "capi-machine2", "capi-machine2", "10.0.128.124", "ip-10-0-128-124.ec2.internal")
 	ocpMachine1 := createUnstructuredMachine("machine.openshift.io/v1beta1", "ocp-machine1", "ocp-machine1", "10.0.172.123", "ip-10-0-172-123.ec2.internal")
 	ocpmachine2 := createUnstructuredMachine("machine.openshift.io/v1beta1", "ocp-machine2", "ocp-machine2", "10.0.172.124", "ip-10-0-172-124.ec2.internal")
-	cl := fake.NewClientBuilder().WithObjects(capiMachine1, capiMachine2, ocpMachine1, ocpmachine2).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(capiMachine1, capiMachine2, ocpMachine1, ocpmachine2).Build()
 	type args struct {
-		apiGroup  string
-		client    client.Client
-		config    *rest.Config
-		ctx       context.Context
-		namespace string
+		apiGroup   string
+		apiVersion string
+		client     client.Client
+		config     *rest.Config
+		ctx        context.Context
+		namespace  string
 	}
 
 	tests := []struct {
@@ -155,11 +157,12 @@ func Test_authorizeCSR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := MachineHandler{
-				APIGroup:  tt.args.apiGroup,
-				Client:    tt.args.client,
-				Config:    tt.args.config,
-				Ctx:       tt.args.ctx,
-				Namespace: tt.args.namespace,
+				APIGroup:   tt.args.apiGroup,
+				APIVersion: tt.args.apiVersion,
+				Client:     tt.args.client,
+				Config:     tt.args.config,
+				Ctx:        tt.args.ctx,
+				Namespace:  tt.args.namespace,
 			}
 			machines, err := handler.ListMachines()
 			if (err != nil) != tt.wantErr {
