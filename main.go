@@ -17,17 +17,20 @@ limitations under the License.
 package main
 
 import (
-	"flag"
+	goflag "flag"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	networkv1 "github.com/openshift/api/network/v1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
+	flag "github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -45,7 +48,8 @@ const (
 
 func main() {
 	var cliConfig string
-	var APIGroup string
+	var apiGroupVersions []string
+	var apiGroup string // deprecated
 	var managementKubeConfigPath string
 	var machineNamespace string
 	var workloadKubeConfigPath string
@@ -59,9 +63,11 @@ func main() {
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
-	klog.InitFlags(flagSet)
+	klog.InitFlags(nil)
+	flagSet.AddGoFlagSet(goflag.CommandLine)
+
 	flagSet.StringVar(&cliConfig, "config", "", "CLI config")
-	flagSet.StringVar(&APIGroup, "apigroup", "machine.openshift.io", "API group for machines, defaults to machine.openshift.io")
+	flagSet.StringSliceVar(&apiGroupVersions, "api-group-version", nil, "API group and version for machines in format '<group>/<version' or just '<group>'. If version is omitted, it will be set to the latest registered version in the cluster. Defaults to 'machine.openshift.io'. This option can be given multiple times.")
 	flagSet.StringVar(&managementKubeConfigPath, "management-cluster-kubeconfig", "", "management kubeconfig path,")
 	flagSet.StringVar(&machineNamespace, "machine-namespace", "", "restrict machine operations to a specific namespace, if not set, all machines will be observed in approval decisions")
 	flagSet.StringVar(&workloadKubeConfigPath, "workload-cluster-kubeconfig", "", "workload kubeconfig path")
@@ -75,8 +81,42 @@ func main() {
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
 	flagSet.Parse(os.Args[1:])
 
-	if err := validateAPIGroup(APIGroup); err != nil {
-		klog.Fatalf(err.Error())
+	// Deprecated options
+	flagSet.StringVar(&apiGroup, "apigroup", "", "API group for machines")
+	flagSet.MarkDeprecated("apigroup", "apigroup has been deprecated in favor of api-group-version option")
+	if apiGroup != "" && len(apiGroupVersions) > 0 {
+		klog.Fatal("Cannot set both --apigroup and --api-group-version options together.")
+	}
+
+	var parsedAPIGroupVersions []schema.GroupVersion
+
+	if len(apiGroupVersions) > 0 {
+		// Parsing API Group Versions
+		for _, apiGroupVersion := range apiGroupVersions {
+			parsedAPIGroupVersion, err := parseGroupVersion(apiGroupVersion)
+			if err != nil {
+				klog.Fatalf("Invalid API Group Version value: %s", apiGroupVersion)
+			}
+			parsedAPIGroupVersions = append(parsedAPIGroupVersions, parsedAPIGroupVersion)
+		}
+	} else {
+		// Setting the default
+		parsedAPIGroupVersions = []schema.GroupVersion{
+			{Group: mapiGroup},
+		}
+	}
+
+	if apiGroup != "" {
+		// For backward compatibility with --apigroup option
+		parsedAPIGroupVersions = []schema.GroupVersion{
+			{Group: apiGroup},
+		}
+	}
+
+	for _, parsedAPIGroupVersion := range parsedAPIGroupVersions {
+		if err := validateAPIGroup(parsedAPIGroupVersion.Group); err != nil {
+			klog.Fatalf(err.Error())
+		}
 	}
 
 	// Now let's start the controller
@@ -164,7 +204,7 @@ func main() {
 		NodeClient:       uncachedWorkloadClient,
 		NodeRestCfg:      workloadConfig,
 		Config:           controller.LoadConfig(cliConfig),
-		APIGroup:         APIGroup,
+		APIGroupVersions: parsedAPIGroupVersions,
 	}).SetupWithManager(mgr, ctrl.Options{}); err != nil {
 		klog.Fatalf("unable to create CSR controller: %v", err)
 	}
@@ -224,4 +264,22 @@ func validateAPIGroup(apiGroup string) error {
 	}
 
 	return nil
+}
+
+// parseGroupVersion turns "group/version" string into a GroupVersion struct. It reports error
+// if it cannot parse the string.
+func parseGroupVersion(gv string) (schema.GroupVersion, error) {
+	if (len(gv) == 0) || (gv == "/") {
+		return schema.GroupVersion{}, nil
+	}
+
+	switch strings.Count(gv, "/") {
+	case 0:
+		return schema.GroupVersion{Group: gv}, nil
+	case 1:
+		i := strings.Index(gv, "/")
+		return schema.GroupVersion{Group: gv[:i], Version: gv[i+1:]}, nil
+	default:
+		return schema.GroupVersion{}, fmt.Errorf("unexpected GroupVersion string: %v", gv)
+	}
 }

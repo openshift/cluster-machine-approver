@@ -21,7 +21,6 @@ var (
 )
 
 type MachineHandler struct {
-	APIGroup  string
 	Client    client.Client
 	Config    *rest.Config
 	Ctx       context.Context
@@ -38,17 +37,21 @@ type MachineStatus struct {
 }
 
 // ListMachines list all machines using given client
-func (m *MachineHandler) ListMachines() ([]Machine, error) {
-	APIVersion, err := m.getAPIGroupPreferredVersion()
-	if err != nil {
-		return nil, err
+func (m *MachineHandler) ListMachines(apiGroupVersion schema.GroupVersion) ([]Machine, error) {
+	apiVersion := apiGroupVersion.Version
+	if apiVersion == "" {
+		var err error
+		apiVersion, err = m.getAPIGroupPreferredVersion(apiGroupVersion.Group)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	unstructuredMachineList := &unstructured.UnstructuredList{}
 	unstructuredMachineList.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   m.APIGroup,
+		Group:   apiGroupVersion.Group,
 		Kind:    "MachineList",
-		Version: APIVersion,
+		Version: apiVersion,
 	})
 	listOpts := make([]client.ListOption, 0)
 	if m.Namespace != "" {
@@ -89,7 +92,7 @@ func (m *MachineHandler) ListMachines() ([]Machine, error) {
 }
 
 // getAPIGroupPreferredVersion get preferred API version using API group
-func (m *MachineHandler) getAPIGroupPreferredVersion() (string, error) {
+func (m *MachineHandler) getAPIGroupPreferredVersion(apiGroup string) (string, error) {
 	if m.Config == nil {
 		return "", fmt.Errorf("machine handler config can't be nil")
 	}
@@ -105,12 +108,12 @@ func (m *MachineHandler) getAPIGroupPreferredVersion() (string, error) {
 	}
 
 	for _, group := range groupList.Groups {
-		if group.Name == m.APIGroup {
+		if group.Name == apiGroup {
 			return group.PreferredVersion.Version, nil
 		}
 	}
 
-	return "", fmt.Errorf("failed to find API group %q", m.APIGroup)
+	return "", fmt.Errorf("failed to find API group %q", apiGroup)
 }
 
 // FindMatchingMachineFromInternalDNS find matching machine for node using internal DNS
