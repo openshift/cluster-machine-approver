@@ -64,6 +64,12 @@ SlwIRyqdMvo4Rc6/JUHQ67eXh1Cvy3w6Sg==
 
 var baseTime = time.Date(2020, 11, 19, 0, 0, 0, 0, time.UTC)
 
+// Default CSR generation parameters using across the tests,
+// actual values sets up within the init function
+var defaultOrgs []string
+var defaultIPs []net.IP
+var defaultDNSNames []string
+
 func init() {
 	now = clock.NewFakePassiveClock(baseTime).Now
 	networkv1.AddToScheme(scheme.Scheme)
@@ -88,16 +94,24 @@ func init() {
 	serverCertGood = string(serverCert)
 	serverKeyGood = string(serverKey)
 
-	goodCSR = createCR("system:node:test", nil, nil, nil)
-	extraAddr = createCR("system:node:test", nil, []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1"), net.ParseIP("99.0.1.1")}, nil)
-	otherName = createCR("system:node:foobar", nil, nil, nil)
-	noNamePrefix = createCR("test", nil, nil, nil)
-	noGroup = createCR("system:node:test", []string{}, nil, nil)
-	clientGood = createCR("system:node:panda", nil, []net.IP{}, []string{})
-	clientExtraO = createCR("system:node:bear", []string{"bamboo", "system:nodes"}, []net.IP{}, []string{})
-	clientWithDNS = createCR("system:node:monkey", nil, []net.IP{}, []string{"banana"})
-	clientWrongCN = createCR("system:notnode:zebra", nil, []net.IP{}, []string{})
-	clientEmptyName = createCR("system:node:", nil, []net.IP{}, []string{})
+	defaultOrgs = []string{"system:nodes"}
+	defaultIPs = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")}
+	defaultDNSNames = []string{"node1", "node1.local"}
+
+	goodCSR = createCSR("system:node:test", defaultOrgs, defaultIPs, defaultDNSNames)
+	extraAddr = createCSR(
+		"system:node:test",
+		defaultOrgs,
+		[]net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1"), net.ParseIP("99.0.1.1")},
+		defaultDNSNames)
+	otherName = createCSR("system:node:foobar", defaultOrgs, defaultIPs, defaultDNSNames)
+	noNamePrefix = createCSR("test", defaultOrgs, defaultIPs, defaultDNSNames)
+	noGroup = createCSR("system:node:test", []string{}, defaultIPs, defaultDNSNames)
+	clientGood = createCSR("system:node:panda", defaultOrgs, []net.IP{}, []string{})
+	clientExtraO = createCSR("system:node:bear", []string{"bamboo", "system:nodes"}, []net.IP{}, []string{})
+	clientWithDNS = createCSR("system:node:monkey", defaultOrgs, []net.IP{}, []string{"banana"})
+	clientWrongCN = createCSR("system:notnode:zebra", defaultOrgs, []net.IP{}, []string{})
+	clientEmptyName = createCSR("system:node:", defaultOrgs, []net.IP{}, []string{})
 	emptyCSR = "-----BEGIN??\n"
 }
 
@@ -170,23 +184,7 @@ func generateCertKeyPair(duration time.Duration, parentCertPEM, parentKeyPEM []b
 	return certOut.Bytes(), keyOut.Bytes(), nil
 }
 
-func createCR(commonName string, organizations []string, ipAddressess []net.IP, dnsNames []string) string {
-	defaultOrganizations := []string{"system:nodes"}
-	defaultIPAdresses := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")}
-	defaultDnsNames := []string{"node1", "node1.local"}
-
-	if organizations == nil {
-		organizations = defaultOrganizations
-	}
-
-	if ipAddressess == nil {
-		ipAddressess = defaultIPAdresses
-	}
-
-	if dnsNames == nil {
-		dnsNames = defaultDnsNames
-	}
-
+func createCSR(commonName string, organizations []string, ipAddressess []net.IP, dnsNames []string) string {
 	keyBytes, _ := rsa.GenerateKey(rand.Reader, 2048)
 	subj := pkix.Name{
 		Organization: organizations,
