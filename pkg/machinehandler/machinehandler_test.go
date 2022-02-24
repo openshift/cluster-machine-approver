@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -155,13 +156,12 @@ func Test_authorizeCSR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := MachineHandler{
-				APIGroup:  tt.args.apiGroup,
 				Client:    tt.args.client,
 				Config:    tt.args.config,
 				Ctx:       tt.args.ctx,
 				Namespace: tt.args.namespace,
 			}
-			machines, err := handler.ListMachines()
+			machines, err := handler.ListMachines(schema.GroupVersion{Group: tt.args.apiGroup})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("unexpected error returned. wantErr: %t. err: %v.", tt.wantErr, err)
 			}

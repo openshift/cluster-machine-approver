@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	certificatesv1client "k8s.io/client-go/kubernetes/typed/certificates/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
@@ -40,8 +41,8 @@ type CertificateApprover struct {
 	MachineRestCfg   *rest.Config
 	MachineNamespace string
 
-	Config   ClusterMachineApproverConfig
-	APIGroup string
+	Config           ClusterMachineApproverConfig
+	APIGroupVersions []schema.GroupVersion
 }
 
 func (m *CertificateApprover) SetupWithManager(mgr ctrl.Manager, options controller.Options) error {
@@ -125,14 +126,18 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 		Client:    m.MachineClient,
 		Config:    m.MachineRestCfg,
 		Ctx:       ctx,
-		APIGroup:  m.APIGroup,
 		Namespace: m.MachineNamespace,
 	}
 
-	machines, err := machineHandler.ListMachines()
-	if err != nil {
-		klog.Errorf("%v: Failed to list machines: %v", req.Name, err)
-		return reconcile.Result{}, fmt.Errorf("Failed to list machines: %w", err)
+	var machines []machinehandlerpkg.Machine
+
+	for _, apiGroupVersion := range m.APIGroupVersions {
+		newMachines, err := machineHandler.ListMachines(apiGroupVersion)
+		if err != nil {
+			klog.Errorf("%v: Failed to list machines in API group %v: %v", req.Name, apiGroupVersion, err)
+			return reconcile.Result{}, fmt.Errorf("Failed to list machines: %w", err)
+		}
+		machines = append(machines, newMachines...)
 	}
 
 	nodes := &corev1.NodeList{}
