@@ -270,21 +270,49 @@ func (m *CertificateApprover) getKubeletCA() *x509.CertPool {
 }
 
 func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) error {
-	csr.Status.Conditions = append(csr.Status.Conditions, certificatesv1.CertificateSigningRequestCondition{
-		Type:           certificatesv1.CertificateApproved,
-		Reason:         "NodeCSRApprove",
-		Message:        "This CSR was approved by the Node CSR Approver",
-		LastUpdateTime: metav1.Now(),
-		Status:         "True",
-	})
-	certClient, err := certificatesv1client.NewForConfig(rest)
-	if err != nil {
-		return err
+	needsupdate := false
+	now := metav1.Now()
+	condition := certificatesv1.CertificateSigningRequestCondition{
+		Type:               certificatesv1.CertificateApproved,
+		Reason:             "NodeCSRApprove",
+		Message:            "This CSR was approved by the Node CSR Approver",
+		LastUpdateTime:     now,
+		LastTransitionTime: now,
+		Status:             "True",
 	}
-	if _, err := certClient.CertificateSigningRequests().
-		UpdateApproval(context.Background(), csr.Name, csr, metav1.UpdateOptions{}); err != nil {
-		return err
+
+	// Check if the new condition already exists, and change it only if there is a status
+	// transition (otherwise we should preserve the current last transition time).
+	exists := false
+	for i := range csr.Status.Conditions {
+		existingCondition := csr.Status.Conditions[i]
+		if existingCondition.Type == condition.Type {
+			exists = true
+			if !hasSameState(existingCondition, condition) {
+				csr.Status.Conditions[i] = condition
+				needsupdate = true
+			}
+			break
+		}
 	}
+
+	// If the condition does not exist, set the last transition time and add it.
+	if !exists {
+		csr.Status.Conditions = append(csr.Status.Conditions, condition)
+		needsupdate = true
+	}
+
+	if needsupdate {
+		certClient, err := certificatesv1client.NewForConfig(rest)
+		if err != nil {
+			return err
+		}
+		if _, err := certClient.CertificateSigningRequests().
+			UpdateApproval(context.Background(), csr.Name, csr, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -307,4 +335,13 @@ func max(x, y int) int {
 		return y
 	}
 	return x
+}
+
+// hasSameState returns true if a condition has the same state of another; state is defined
+// by the union of following fields: Type, Status, Reason, Severity and Message (it excludes LastTransitionTime).
+func hasSameState(i, j certificatesv1.CertificateSigningRequestCondition) bool {
+	return i.Type == j.Type &&
+		i.Status == j.Status &&
+		i.Reason == j.Reason &&
+		i.Message == j.Message
 }
