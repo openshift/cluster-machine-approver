@@ -31,6 +31,7 @@ const (
 	nodeUserPrefix = nodeUser + ":"
 
 	maxPendingDelta                           = time.Hour
+	maxApprovedDelta                          = 30 * time.Second
 	maxDiffBetweenPendingCSRsAndMachinesCount = 100
 
 	nodeBootstrapperUsername = "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper"
@@ -461,6 +462,29 @@ func isApproved(csr certificatesv1.CertificateSigningRequest) bool {
 	for _, condition := range csr.Status.Conditions {
 		if condition.Type == certificatesv1.CertificateApproved {
 			return true
+		}
+	}
+	return false
+}
+
+func isRecentlyApproved(csr certificatesv1.CertificateSigningRequest) bool {
+	// assumes we are scheduled on the master meaning our clock is the same
+	currentTime := now()
+	start := currentTime.Add(-maxApprovedDelta)
+	end := currentTime.Add(maxMachineClockSkew)
+
+	for _, condition := range csr.Status.Conditions {
+		if condition.Type == certificatesv1.CertificateApproved {
+			return inTimeSpan(start, end, condition.LastTransitionTime.Time)
+		}
+	}
+	return false
+}
+
+func isApprovedByCMA(csr certificatesv1.CertificateSigningRequest) bool {
+	for _, condition := range csr.Status.Conditions {
+		if condition.Type == certificatesv1.CertificateApproved {
+			return condition.Message == csrConditionApproveMessage
 		}
 	}
 	return false
