@@ -28,8 +28,9 @@ import (
 )
 
 const (
-	configNamespace    = "openshift-config-managed"
-	kubeletCAConfigMap = "csr-controller-ca"
+	configNamespace            = "openshift-config-managed"
+	kubeletCAConfigMap         = "csr-controller-ca"
+	csrConditionApproveMessage = "This CSR was approved by the Node CSR Approver (cluster-machine-approver)"
 )
 
 // MachineApproverReconciler reconciles a machine-approver  object
@@ -71,7 +72,7 @@ func (m *CertificateApprover) buildWithManager(mgr ctrl.Manager, options control
 
 func pendingCertFilter(obj runtime.Object) bool {
 	cert, ok := obj.(*certificatesv1.CertificateSigningRequest)
-	return ok && !isApproved(*cert)
+	return ok && !isApproved(*cert) || (isRecentlyApproved(*cert) && !isApprovedByCMA(*cert))
 }
 
 func (m *CertificateApprover) toCSRs(client.Object) []reconcile.Request {
@@ -83,7 +84,8 @@ func (m *CertificateApprover) toCSRs(client.Object) []reconcile.Request {
 		return nil
 	}
 	for _, csr := range list.Items {
-		if isApproved(csr) {
+		// Only reconcile pending or recently approved by another controller
+		if isApproved(csr) && (!isRecentlyApproved(csr) || isApprovedByCMA(csr)) {
 			continue
 		}
 		requests = append(requests, reconcile.Request{
@@ -275,7 +277,7 @@ func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) e
 	condition := certificatesv1.CertificateSigningRequestCondition{
 		Type:               certificatesv1.CertificateApproved,
 		Reason:             "NodeCSRApprove",
-		Message:            "This CSR was approved by the Node CSR Approver",
+		Message:            csrConditionApproveMessage,
 		LastUpdateTime:     now,
 		LastTransitionTime: now,
 		Status:             "True",
