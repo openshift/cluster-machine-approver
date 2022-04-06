@@ -79,11 +79,13 @@ func main() {
 	flagSet.DurationVar(&leaderElectRetryPeriod, "leader-elect-retry-period", 26*time.Second, "the duration the LeaderElector clients should wait between tries of actions.")
 	flagSet.StringVar(&leaderElectResourceName, "leader-elect-resource-name", "cluster-machine-approver-leader", "the name of the resource that leader election will use for holding the leader lock.")
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
-	flagSet.Parse(os.Args[1:])
 
 	// Deprecated options
 	flagSet.StringVar(&apiGroup, "apigroup", "", "API group for machines")
 	flagSet.MarkDeprecated("apigroup", "apigroup has been deprecated in favor of api-group-version option")
+
+	flagSet.Parse(os.Args[1:])
+
 	if apiGroup != "" && len(apiGroupVersions) > 0 {
 		klog.Fatal("Cannot set both --apigroup and --api-group-version options together.")
 	}
