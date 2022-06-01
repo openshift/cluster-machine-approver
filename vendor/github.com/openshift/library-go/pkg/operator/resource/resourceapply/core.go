@@ -124,10 +124,17 @@ func ApplyNamespaceImproved(ctx context.Context, client coreclientv1.NamespacesG
 	return actual, true, err
 }
 
-// ApplyService merges objectmeta and requires
-// TODO, since this cannot determine whether changes are due to legitimate actors (api server) or illegitimate ones (users), we cannot update
+// ApplyService merges objectmeta and requires.
+// It detects changes in `required`, i.e. an operator needs .spec changes and overwrites existing .spec with those.
+// TODO, since this cannot determine whether changes in `existing` are due to legitimate actors (api server) or illegitimate ones (users), we cannot update.
 // TODO I've special cased the selector for now
-func ApplyServiceImproved(ctx context.Context, client coreclientv1.ServicesGetter, recorder events.Recorder, required *corev1.Service, cache ResourceCache) (*corev1.Service, bool, error) {
+func ApplyServiceImproved(ctx context.Context, client coreclientv1.ServicesGetter, recorder events.Recorder, requiredOriginal *corev1.Service, cache ResourceCache) (*corev1.Service, bool, error) {
+	required := requiredOriginal.DeepCopy()
+	err := SetSpecHashAnnotation(&required.ObjectMeta, required.Spec)
+	if err != nil {
+		return nil, false, err
+	}
+
 	existing, err := client.Services(required.Namespace).Get(ctx, required.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		requiredCopy := required.DeepCopy()
@@ -148,6 +155,8 @@ func ApplyServiceImproved(ctx context.Context, client coreclientv1.ServicesGette
 	modified := resourcemerge.BoolPtr(false)
 	existingCopy := existing.DeepCopy()
 
+	// This will catch also changes between old `required.spec` and current `required.spec`, because
+	// the annotation from SetSpecHashAnnotation will be different.
 	resourcemerge.EnsureObjectMeta(modified, &existingCopy.ObjectMeta, required.ObjectMeta)
 	selectorSame := equality.Semantic.DeepEqual(existingCopy.Spec.Selector, required.Spec.Selector)
 
@@ -163,9 +172,9 @@ func ApplyServiceImproved(ctx context.Context, client coreclientv1.ServicesGette
 		return existingCopy, false, nil
 	}
 
-	existingCopy.Spec.Selector = required.Spec.Selector
-	existingCopy.Spec.Type = required.Spec.Type // if this is different, the update will fail.  Status will indicate it.
-
+	// Either (user changed selector or type) or metadata changed (incl. spec hash). Stomp over
+	// any user *and* Kubernetes changes, hoping that Kubernetes will restore its values.
+	existingCopy.Spec = required.Spec
 	if klog.V(4).Enabled() {
 		klog.Infof("Service %q changes: %v", required.Namespace+"/"+required.Name, JSONPatchNoError(existing, required))
 	}
@@ -337,16 +346,10 @@ func ApplyConfigMapImproved(ctx context.Context, client coreclientv1.ConfigMapsG
 
 // ApplySecret merges objectmeta, requires data
 func ApplySecretImproved(ctx context.Context, client coreclientv1.SecretsGetter, recorder events.Recorder, requiredInput *corev1.Secret, cache ResourceCache) (*corev1.Secret, bool, error) {
+	// copy the stringData to data.  Error on a data content conflict inside required.  This is usually a bug.
+
 	existing, err := client.Secrets(requiredInput.Namespace).Get(ctx, requiredInput.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		requiredCopy := requiredInput.DeepCopy()
-		actual, err := client.Secrets(requiredCopy.Namespace).
-			Create(ctx, resourcemerge.WithCleanLabelsAndAnnotations(requiredCopy).(*corev1.Secret), metav1.CreateOptions{})
-		reportCreateEvent(recorder, requiredCopy, err)
-		cache.UpdateCachedResourceMetadata(requiredInput, actual)
-		return actual, true, err
-	}
-	if err != nil {
+	if err != nil && !apierrors.IsNotFound(err) {
 		return nil, false, err
 	}
 
@@ -354,7 +357,6 @@ func ApplySecretImproved(ctx context.Context, client coreclientv1.SecretsGetter,
 		return existing, false, nil
 	}
 
-	// copy the stringData to data.  Error on a data content conflict inside required.  This is usually a bug.
 	required := requiredInput.DeepCopy()
 	if required.Data == nil {
 		required.Data = map[string][]byte{}
@@ -368,6 +370,18 @@ func ApplySecretImproved(ctx context.Context, client coreclientv1.SecretsGetter,
 		required.Data[k] = []byte(v)
 	}
 	required.StringData = nil
+
+	if apierrors.IsNotFound(err) {
+		requiredCopy := required.DeepCopy()
+		actual, err := client.Secrets(requiredCopy.Namespace).
+			Create(ctx, resourcemerge.WithCleanLabelsAndAnnotations(requiredCopy).(*corev1.Secret), metav1.CreateOptions{})
+		reportCreateEvent(recorder, requiredCopy, err)
+		cache.UpdateCachedResourceMetadata(requiredInput, actual)
+		return actual, true, err
+	}
+	if err != nil {
+		return nil, false, err
+	}
 
 	existingCopy := existing.DeepCopy()
 
@@ -397,7 +411,7 @@ func ApplySecretImproved(ctx context.Context, client coreclientv1.SecretsGetter,
 	}
 
 	if equality.Semantic.DeepEqual(existingCopy, existing) {
-		cache.UpdateCachedResourceMetadata(required, existingCopy)
+		cache.UpdateCachedResourceMetadata(requiredInput, existingCopy)
 		return existing, false, nil
 	}
 
@@ -431,7 +445,7 @@ func ApplySecretImproved(ctx context.Context, client coreclientv1.SecretsGetter,
 	existingCopy.ResourceVersion = ""
 	actual, err = client.Secrets(required.Namespace).Create(ctx, existingCopy, metav1.CreateOptions{})
 	reportCreateEvent(recorder, existingCopy, err)
-	cache.UpdateCachedResourceMetadata(required, actual)
+	cache.UpdateCachedResourceMetadata(requiredInput, actual)
 	return actual, true, err
 }
 
@@ -479,7 +493,13 @@ func SyncPartialConfigMap(ctx context.Context, client coreclientv1.ConfigMapsGet
 }
 
 func deleteConfigMapSyncTarget(ctx context.Context, client coreclientv1.ConfigMapsGetter, recorder events.Recorder, targetNamespace, targetName string) (bool, error) {
-	err := client.ConfigMaps(targetNamespace).Delete(ctx, targetName, metav1.DeleteOptions{})
+	// This goal of this additional GET is to avoid reaching the API with a DELETE request
+	// in case the target doesn't exist. This is useful when using a cached client.
+	_, err := client.ConfigMaps(targetNamespace).Get(ctx, targetName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	err = client.ConfigMaps(targetNamespace).Delete(ctx, targetName, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
