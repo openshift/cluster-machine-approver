@@ -155,3 +155,13 @@ func FindMatchingMachineFromNodeRef(machines []Machine, nodeName string) (*Machi
 	}
 	return nil, fmt.Errorf("matching machine not found")
 }
+
+// Check whether a machine is an Azure Ephemeral OS Disk VM
+func IsMachineAzureEphemeralOsDiskNode(machines []Machine, nodeName string) bool {
+	for _, machine := range machines {
+		if machine.Status.NodeRef != nil && machine.Status.NodeRef.Name == nodeName {
+			return machine.Spec.ProviderSpec.Value.OsDisk.OsDiskSettings.EphemeralStorageLocation == "Local"
+		}
+	}
+	return false
+}

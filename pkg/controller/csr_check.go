@@ -246,6 +246,19 @@ func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machin
 		klog.Errorf("%v: unable to get node %s error: %v", req.Name, nodeName, err)
 		return false, fmt.Errorf("failed get existing nodes %s", nodeName)
 	} else if err == nil {
+		// Now that we have node, we need to check if it is an Azure ephemeral OS disk node, because when they are redeployed it results
+		// in the OS being reprovisioned which in turns requires new certificates for the machine to rejoin the cluster. To this end we
+		// need to drop the existing node, nodeRef, and creation timebox requirements in order to allow the machine to rejoin the cluster
+		// Ref: https://docs.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks
+		if machinehandlerpkg.IsMachineAzureEphemeralOsDiskNode(machines, nodeName) {
+			_, err := machinehandlerpkg.FindMatchingMachineFromInternalDNS(machines, nodeName)
+			if err != nil {
+				//TODO: set annotation/emit event here.
+				klog.Errorf("%v: failed to find machine for ephemeral OS disk node %s, cannot approve", req.Name, nodeName)
+				return false, fmt.Errorf("failed to find machine for node %s", nodeName)
+			}
+			return true, nil // approve node client cert
+		}
 		//TODO: set annotation/emit event here.
 		klog.Errorf("%v: node %s already exists, cannot approve", req.Name, nodeName)
 		return false, nil
