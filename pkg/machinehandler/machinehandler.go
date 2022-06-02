@@ -29,11 +29,28 @@ type MachineHandler struct {
 
 type Machine struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Status            MachineStatus `json:"status,omitempty"`
+	Status            MachineStatus       `json:"status,omitempty"`
+	Spec              MachineProviderSpec `json:"spec,omitempty"`
 }
 type MachineStatus struct {
 	NodeRef   *corev1.ObjectReference `json:"nodeRef,omitempty"`
 	Addresses []corev1.NodeAddress    `json:"addresses,omitempty"`
+}
+
+type MachineProviderSpec struct {
+	ProviderSpec MachineProviderSpecValue `json:"providerSpec,omitempty"`
+}
+type MachineProviderSpecValue struct {
+	Value MachineSpec `json:"value,omitempty"`
+}
+type MachineSpec struct {
+	OsDisk MachineSpecOsDisk `json:"osDisk,omitempty"`
+}
+type MachineSpecOsDisk struct {
+	OsDiskSettings MachineSpecOsDiskSettings `json:"diskSettings,omitempty"`
+}
+type MachineSpecOsDiskSettings struct {
+	EphemeralStorageLocation string `json:"ephemeralStorageLocation,omitempty"`
 }
 
 // ListMachines list all machines using given client
