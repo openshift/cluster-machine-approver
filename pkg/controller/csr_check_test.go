@@ -23,9 +23,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	testingclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	machinehandlerpkg "github.com/openshift/cluster-machine-approver/pkg/machinehandler"
@@ -71,7 +71,7 @@ var defaultIPs []net.IP
 var defaultDNSNames []string
 
 func init() {
-	now = clock.NewFakePassiveClock(baseTime).Now
+	now = testingclock.NewFakePassiveClock(baseTime).Now
 	networkv1.AddToScheme(scheme.Scheme)
 	configv1.AddToScheme(scheme.Scheme)
 
