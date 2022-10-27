@@ -29,8 +29,8 @@ spec:
       serviceAccountName: machine-approver-sa
       containers:
       - args:
-        - --secure-listen-address=0.0.0.0:9192
-        - --upstream=http://127.0.0.1:9191/
+        - --secure-listen-address=0.0.0.0:9194
+        - --upstream=http://127.0.0.1:9193/
         - --tls-cert-file=/etc/tls/private/tls.crt
         - --tls-private-key-file=/etc/tls/private/tls.key
         - --config-file=/etc/kube-rbac-proxy/config-file.yaml
@@ -41,7 +41,7 @@ spec:
         imagePullPolicy: IfNotPresent
         name: kube-rbac-proxy
         ports:
-        - containerPort: 9192
+        - containerPort: 9194
           name: https
           protocol: TCP
         terminationMessagePath: /dev/termination-log
@@ -82,7 +82,7 @@ spec:
         - name: RELEASE_VERSION
           value: "0.0.1-snapshot"
         - name: METRICS_PORT
-          value: "9191"
+          value: "9193"
         terminationMessagePolicy: FallbackToLogsOnError
       volumes:
       - configMap:
