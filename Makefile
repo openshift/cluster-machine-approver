@@ -1,3 +1,9 @@
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+ENVTEST_K8S_VERSION = 1.25
+
+PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+ENVTEST = go run ${PROJECT_DIR}/vendor/sigs.k8s.io/controller-runtime/tools/setup-envtest
+
 GO111MODULE = on
 export GO111MODULE
 GOFLAGS ?= -mod=vendor
@@ -35,7 +41,7 @@ all build:
 .PHONY: all build
 
 test:
-	$(DOCKER_CMD) hack/ci-test.sh
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path --bin-dir $(PROJECT_DIR)/bin)" ./hack/ci-test.sh
 .PHONY: test
 
 unit:
