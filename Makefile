@@ -10,7 +10,7 @@ GOFLAGS ?= -mod=vendor
 export GOFLAGS
 GOPROXY ?=
 export GOPROXY
-BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.18
+BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.19
 
 
 NO_DOCKER ?= 0
@@ -40,12 +40,11 @@ all build:
 	$(DOCKER_CMD) go build -o machine-approver .
 .PHONY: all build
 
-test:
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path --bin-dir $(PROJECT_DIR)/bin)" ./hack/ci-test.sh
+test: unit
 .PHONY: test
 
 unit:
-	$(DOCKER_CMD) go test -v ./...
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path --bin-dir $(PROJECT_DIR)/bin)" ./hack/ci-test.sh
 .PHONY: unit
 
 .PHONY: goimports
