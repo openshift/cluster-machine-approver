@@ -1,10 +1,16 @@
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+ENVTEST_K8S_VERSION = 1.26
+
+PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+ENVTEST = go run ${PROJECT_DIR}/vendor/sigs.k8s.io/controller-runtime/tools/setup-envtest
+
 GO111MODULE = on
 export GO111MODULE
 GOFLAGS ?= -mod=vendor
 export GOFLAGS
 GOPROXY ?=
 export GOPROXY
-BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.18
+BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.19
 
 
 NO_DOCKER ?= 0
@@ -34,12 +40,11 @@ all build:
 	$(DOCKER_CMD) go build -o machine-approver .
 .PHONY: all build
 
-test:
-	$(DOCKER_CMD) hack/ci-test.sh
+test: unit
 .PHONY: test
 
 unit:
-	$(DOCKER_CMD) go test -v ./...
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path --bin-dir $(PROJECT_DIR)/bin)" ./hack/ci-test.sh
 .PHONY: unit
 
 .PHONY: goimports
