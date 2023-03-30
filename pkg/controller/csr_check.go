@@ -60,7 +60,7 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 		return "", nil
 	}
 
-	nodeAsking := strings.TrimPrefix(req.Spec.Username, nodeUserPrefix)
+	nodeAsking := getNodeName(req)
 	if len(nodeAsking) == 0 {
 		klog.Infof("%v: CSR does not appear to be a node serving cert", req.Name)
 		return "", nil
@@ -707,4 +707,9 @@ func certSANs(cert *x509.Certificate) []string {
 	}
 
 	return sans
+}
+
+// getNodeName trims the CSRs Spec.Username to get the expected node name.
+func getNodeName(csr *certificatesv1.CertificateSigningRequest) string {
+	return strings.TrimPrefix(csr.Spec.Username, nodeUserPrefix)
 }

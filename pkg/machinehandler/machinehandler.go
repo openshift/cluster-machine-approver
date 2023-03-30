@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mitchellh/mapstructure"
+	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -18,6 +19,7 @@ import (
 
 var (
 	ErrUnstructuredFieldNotFound = fmt.Errorf("field not found")
+	csrMachineAnnotation         = "machine.openshift.io/csr-name"
 )
 
 type MachineHandler struct {
@@ -28,6 +30,7 @@ type MachineHandler struct {
 }
 
 type Machine struct {
+	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Status            MachineStatus `json:"status,omitempty"`
 }
@@ -85,6 +88,9 @@ func (m *MachineHandler) ListMachines(apiGroupVersion schema.GroupVersion) ([]Ma
 		if err != nil {
 			return nil, err
 		}
+		// I don't know why it won't just automatically decode that.
+		machine.Kind = obj.GetKind()
+		machine.APIVersion = obj.GetAPIVersion()
 		machines = append(machines, machine)
 	}
 
@@ -137,4 +143,25 @@ func FindMatchingMachineFromNodeRef(machines []Machine, nodeName string) (*Machi
 
 	}
 	return nil, fmt.Errorf("matching machine not found")
+}
+
+// PatchCSRAnnotation sets annotation with CSR name onto Machine
+func (m *MachineHandler) PatchCSRAnnotation(machineClient client.Client, machine *Machine, csr certificatesv1.CertificateSigningRequest) error {
+	unstructuredMachine := &unstructured.Unstructured{}
+	unstructuredMachine.SetAPIVersion(machine.APIVersion)
+	unstructuredMachine.SetKind(machine.Kind)
+	key := client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}
+
+	err := machineClient.Get(context.Background(), key, unstructuredMachine)
+	if err != nil {
+		return err
+	}
+
+	newUnstructuredMachine := &unstructured.Unstructured{}
+	unstructuredMachine.DeepCopyInto(newUnstructuredMachine)
+	annotations := newUnstructuredMachine.GetAnnotations()
+	annotations[csrMachineAnnotation] = csr.Name
+	newUnstructuredMachine.SetAnnotations(annotations)
+
+	return machineClient.Patch(context.Background(), newUnstructuredMachine, client.MergeFrom(unstructuredMachine))
 }

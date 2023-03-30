@@ -156,6 +156,13 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 	for _, csr := range csrs.Items {
 		if csr.Name == req.Name {
 			if err := m.reconcileCSR(csr, machines); err != nil {
+				// Annotate the machine with its CSR in order to force reconciliation so that we'll make sure it's up to
+				// date for the next try to approve it.
+				err = m.patchCSRNameToMachine(csr, machines, machineHandler)
+				if err != nil {
+					klog.Warningf("couldn't patch machine with CSR %s: %s, it will not be bumped, ignoring", csr.Name, err)
+					// Ignoring error on purpose, if we couldn't patch, then whatever.
+				}
 				return reconcile.Result{}, fmt.Errorf("could not reconcile CSR: %v", err)
 			}
 
@@ -171,6 +178,18 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 	klog.Errorf("Failed to find CSR: %v", req)
 
 	return reconcile.Result{}, nil
+}
+
+func (m *CertificateApprover) patchCSRNameToMachine(csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine,
+	machineHandler *machinehandlerpkg.MachineHandler) error {
+	nodeAsking := getNodeName(&csr)
+	if len(nodeAsking) != 0 {
+		machine, err := machinehandlerpkg.FindMatchingMachineFromNodeRef(machines, nodeAsking)
+		if err == nil {
+			return machineHandler.PatchCSRAnnotation(m.MachineClient, machine, csr)
+		}
+	}
+	return fmt.Errorf("couldn't find the machine for CSR")
 }
 
 // reconcileLimits will short circut logic if number of pending CSRs is exceeding limit
