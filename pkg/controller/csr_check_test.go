@@ -3,6 +3,8 @@ package controller
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -35,7 +37,7 @@ import (
 var serverCertGood, serverKeyGood, rootCertGood string
 
 // Generated CRs, are populating within the init func
-var goodCSR, extraAddr, otherName, noNamePrefix, noGroup, clientGood, clientExtraO, clientWithDNS, clientWrongCN, clientEmptyName, emptyCSR string
+var goodCSR, goodCSRECDSA, extraAddr, otherName, noNamePrefix, noGroup, clientGood, clientExtraO, clientWithDNS, clientWrongCN, clientEmptyName, emptyCSR string
 
 var presetTimeCorrect, presetTimeExpired time.Time
 
@@ -99,6 +101,7 @@ func init() {
 	defaultDNSNames = []string{"node1", "node1.local"}
 
 	goodCSR = createCSR("system:node:test", defaultOrgs, defaultIPs, defaultDNSNames)
+	goodCSRECDSA = createCSRECDSA("system:node:test", defaultOrgs, defaultIPs, defaultDNSNames)
 	extraAddr = createCSR(
 		"system:node:test",
 		defaultOrgs,
@@ -116,7 +119,6 @@ func init() {
 }
 
 func generateCertKeyPair(duration time.Duration, parentCertPEM, parentKeyPEM []byte, commonName string, otherNames ...string) ([]byte, []byte, error) {
-	var err error
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, err
@@ -194,6 +196,27 @@ func createCSR(commonName string, organizations []string, ipAddressess []net.IP,
 	template := x509.CertificateRequest{
 		Subject:            subj,
 		SignatureAlgorithm: x509.SHA256WithRSA,
+		IPAddresses:        ipAddressess,
+		DNSNames:           dnsNames,
+	}
+	csrOut := new(bytes.Buffer)
+
+	csrBytes, _ := x509.CreateCertificateRequest(rand.Reader, &template, keyBytes)
+	pem.Encode(csrOut, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+	return csrOut.String()
+}
+
+func createCSRECDSA(commonName string, organizations []string, ipAddressess []net.IP, dnsNames []string) string {
+	keyBytes, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+	subj := pkix.Name{
+		Organization: organizations,
+		CommonName:   commonName,
+	}
+
+	template := x509.CertificateRequest{
+		Subject:            subj,
+		SignatureAlgorithm: x509.ECDSAWithSHA256,
 		IPAddresses:        ipAddressess,
 		DNSNames:           dnsNames,
 	}
@@ -320,6 +343,28 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				csr: goodCSR,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			name: "ok with ECDSA",
+			args: args{
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr: goodCSRECDSA,
 			},
 			wantErr:   "",
 			authorize: true,
@@ -503,10 +548,7 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1.KeyUsage{
-							certificatesv1.UsageDigitalSignature,
-							certificatesv1.UsageServerAuth,
-						},
+						Usages:   []certificatesv1.KeyUsage{},
 						Username: "system:node:test",
 						Groups: []string{
 							"system:authenticated",
