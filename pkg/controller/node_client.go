@@ -29,9 +29,14 @@ func hasExactUsages(csr *certificatesv1.CertificateSigningRequest, usages []cert
 	return true
 }
 
-var kubeletClientUsages = []certificatesv1.KeyUsage{
+var kubeletClientUsagesLegacy = []certificatesv1.KeyUsage{
 	certificatesv1.UsageKeyEncipherment,
 	certificatesv1.UsageDigitalSignature,
+	certificatesv1.UsageClientAuth,
+}
+
+var kubeletClientUsages = []certificatesv1.KeyUsage{
+	certificatesv1.UsageKeyEncipherment,
 	certificatesv1.UsageClientAuth,
 }
 
@@ -42,7 +47,7 @@ func isNodeClientCert(csr *certificatesv1.CertificateSigningRequest, x509cr *x50
 	if (len(x509cr.DNSNames) > 0) || (len(x509cr.EmailAddresses) > 0) || (len(x509cr.IPAddresses) > 0) {
 		return false
 	}
-	if !hasExactUsages(csr, kubeletClientUsages) {
+	if !hasExactUsages(csr, kubeletClientUsagesLegacy) && !hasExactUsages(csr, kubeletClientUsages) {
 		return false
 	}
 	if !strings.HasPrefix(x509cr.Subject.CommonName, "system:node:") {
