@@ -77,25 +77,31 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 		return "", fmt.Errorf("%q not in %q and %q", groupSet, "system:authenticated", nodeGroup)
 	}
 
+	validationUsageSetLegacy := []string{
+		string(certificatesv1.UsageDigitalSignature),
+		string(certificatesv1.UsageKeyEncipherment),
+		string(certificatesv1.UsageServerAuth),
+	}
+	validationUsageSet := []string{
+		string(certificatesv1.UsageDigitalSignature),
+		string(certificatesv1.UsageServerAuth),
+	}
+
 	// Check usages, we need only:
 	// - digital signature
 	// - key encipherment
-	// - server auth
-	if len(req.Spec.Usages) != 3 {
+	if len(req.Spec.Usages) != len(validationUsageSetLegacy) && len(req.Spec.Usages) != len(validationUsageSet) {
+		// - server auth
 		return "", fmt.Errorf("Too few usages")
 	}
 
-	usages := make([]string, 3)
+	usages := make([]string, len(req.Spec.Usages))
 	for i := range req.Spec.Usages {
 		usages[i] = string(req.Spec.Usages[i])
 	}
 
 	usageSet := sets.NewString(usages...)
-	if !usageSet.HasAll(
-		string(certificatesv1.UsageDigitalSignature),
-		string(certificatesv1.UsageKeyEncipherment),
-		string(certificatesv1.UsageServerAuth),
-	) {
+	if !usageSet.HasAll(validationUsageSet...) && !usageSet.HasAll(validationUsageSetLegacy...) {
 		return "", fmt.Errorf("%q is missing usages", usageSet)
 	}
 
