@@ -56,7 +56,7 @@ var PendingCSRs uint32
 
 func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
-		klog.Infof("%v: CSR does not appear to be a node serving cert", req.Name)
+		klog.Infof("%v: CSR does not appear to be a node serving cert (Username=%v)", req.Name, req.Spec.Username)
 		return "", nil
 	}
 
