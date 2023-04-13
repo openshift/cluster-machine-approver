@@ -36,7 +36,7 @@ var kubeletClientUsagesLegacy = []certificatesv1.KeyUsage{
 }
 
 var kubeletClientUsages = []certificatesv1.KeyUsage{
-	certificatesv1.UsageKeyEncipherment,
+	certificatesv1.UsageDigitalSignature,
 	certificatesv1.UsageClientAuth,
 }
 
