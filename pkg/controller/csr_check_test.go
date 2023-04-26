@@ -1863,7 +1863,7 @@ func TestGetServingCert(t *testing.T) {
 			nodeName:  "test",
 			node:      defaultNode,
 			rootCerts: []*x509.Certificate{parseCert(t, differentCert)},
-			wantErr:   "x509: certificate signed by unknown authority",
+			wantErr:   "tls: failed to verify certificate: x509: certificate signed by unknown authority",
 		},
 		{
 			name:      "node not found",
