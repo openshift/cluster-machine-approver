@@ -139,11 +139,6 @@ func main() {
 		klog.Fatalf("Can't set client configs: %v", err)
 	}
 
-	managementClient, workloadClient, err := createClients(managementConfig, workloadConfig)
-	if err != nil {
-		klog.Fatalf("Can't create clients: %v", err)
-	}
-
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
 	mgr, err := manager.New(workloadConfig, manager.Options{
@@ -174,23 +169,26 @@ func main() {
 	// Prevent the controller from caching node and machine objects.
 	// Stale nodes and machines can cause the approver to not approve certificates
 	// within a timely manner, leading to failed node bootstraps.
-	uncachedManagementClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		Client:      *managementClient,
-		CacheReader: mgr.GetClient(),
-		// CacheUnstructured should be false because we manipulate with unstructured machines
-		CacheUnstructured: false,
+	uncachedManagementClient, err := client.New(managementConfig, client.Options{
+		Cache: &client.CacheOptions{
+			Reader: mgr.GetClient(),
+			// Unstructured should be false because we manipulate with unstructured machines
+			Unstructured: false,
+		},
 	})
 	if err != nil {
 		klog.Fatalf("unable to set up delegating client: %v", err)
 	}
 
-	uncachedWorkloadClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		Client:      *workloadClient,
-		CacheReader: mgr.GetClient(),
-		UncachedObjects: []client.Object{
-			&corev1.Node{},
-			&configv1.Network{},
-			&networkv1.HostSubnet{},
+	uncachedWorkloadClient, err := client.New(workloadConfig, client.Options{
+		Cache: &client.CacheOptions{
+			Reader:       mgr.GetClient(),
+			Unstructured: false,
+			DisableFor: []client.Object{
+				&corev1.Node{},
+				&configv1.Network{},
+				&networkv1.HostSubnet{},
+			},
 		},
 	})
 	if err != nil {
