@@ -24,7 +24,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -60,7 +59,7 @@ func (m *CertificateApprover) buildWithManager(mgr ctrl.Manager, options control
 			DeleteFunc:  func(e event.DeleteEvent) bool { return false },
 		})).
 		Watches(
-			&source.Kind{Type: &corev1.ConfigMap{}},
+			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(m.toCSRs),
 			builder.WithPredicates(predicate.Funcs{
 				CreateFunc:  func(e event.CreateEvent) bool { return caConfigMapFilter(e.Object, nil) },
@@ -75,10 +74,10 @@ func pendingCertFilter(obj runtime.Object) bool {
 	return ok && !isApproved(*cert) || (isRecentlyApproved(*cert) && !isApprovedByCMA(*cert))
 }
 
-func (m *CertificateApprover) toCSRs(client.Object) []reconcile.Request {
+func (m *CertificateApprover) toCSRs(ctx context.Context, obj client.Object) []reconcile.Request {
 	requests := []reconcile.Request{}
 	list := &certificatesv1.CertificateSigningRequestList{}
-	err := m.NodeClient.List(context.Background(), list)
+	err := m.NodeClient.List(ctx, list)
 	if err != nil {
 		klog.Errorf("Unable to list pending CSRs: %v", err)
 		return nil
