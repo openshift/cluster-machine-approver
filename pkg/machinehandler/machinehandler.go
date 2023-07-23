@@ -2,6 +2,7 @@ package machinehandler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -17,7 +18,7 @@ import (
 )
 
 var (
-	ErrUnstructuredFieldNotFound = fmt.Errorf("field not found")
+	ErrApiVersionNotFound = errors.New("failed to find API version")
 )
 
 type MachineHandler struct {
@@ -43,6 +44,13 @@ func (m *MachineHandler) ListMachines(apiGroupVersion schema.GroupVersion) ([]Ma
 		var err error
 		apiVersion, err = m.getAPIGroupPreferredVersion(apiGroupVersion.Group)
 		if err != nil {
+			// when MachineAPI capability is disabled we ignore error
+			// that we can't find api version for given group
+			// and return nil, because there are no machines,
+			// and it makes no sense to continue function
+			if err == ErrApiVersionNotFound {
+				return nil, nil
+			}
 			return nil, err
 		}
 	}
@@ -113,7 +121,7 @@ func (m *MachineHandler) getAPIGroupPreferredVersion(apiGroup string) (string, e
 		}
 	}
 
-	return "", fmt.Errorf("failed to find API group %q", apiGroup)
+	return "", ErrApiVersionNotFound
 }
 
 // FindMatchingMachineFromInternalDNS find matching machine for node using internal DNS
