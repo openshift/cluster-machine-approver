@@ -9,6 +9,7 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -66,6 +67,12 @@ func (m *MachineHandler) ListMachines(apiGroupVersion schema.GroupVersion) ([]Ma
 		listOpts = append(listOpts, client.InNamespace(m.Namespace))
 	}
 	if err := m.Client.List(m.Ctx, unstructuredMachineList, listOpts...); err != nil {
+		// Sometimes when MachineAPI disabled k8s returns StatusReasonUnknown for the List
+		// request, that's why we check this reason as well and return nil because there
+		// are no machines present
+		if k8serrors.IsNotFound(err) || k8serrors.ReasonForError(err) == metav1.StatusReasonUnknown {
+			return nil, nil
+		}
 		return nil, err
 	}
 
