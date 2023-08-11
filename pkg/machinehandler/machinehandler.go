@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	ErrApiVersionNotFound = errors.New("failed to find API version")
+	ErrApiGroupNotFound = errors.New("failed to find API group")
 )
 
 type MachineHandler struct {
@@ -39,20 +39,22 @@ type MachineStatus struct {
 
 // ListMachines list all machines using given client
 func (m *MachineHandler) ListMachines(apiGroupVersion schema.GroupVersion) ([]Machine, error) {
-	apiVersion := apiGroupVersion.Version
-	if apiVersion == "" {
-		var err error
-		apiVersion, err = m.getAPIGroupPreferredVersion(apiGroupVersion.Group)
-		if err != nil {
-			// when MachineAPI capability is disabled we ignore error
-			// that we can't find api version for given group
-			// and return nil, because there are no machines,
-			// and it makes no sense to continue function
-			if err == ErrApiVersionNotFound {
-				return nil, nil
-			}
-			return nil, err
+	apiVersion, err := m.getAPIGroupPreferredVersion(apiGroupVersion.Group)
+	if err != nil {
+		// when MachineAPI capability is disabled we ignore error
+		// that we can't find api version/group for given group
+		// and return nil, because there are no machines,
+		// and it makes no sense to continue function
+		if err == ErrApiGroupNotFound {
+			return nil, nil
 		}
+		return nil, err
+	}
+
+	// we set group version to user provided one
+	// if not, set preffered version from discovery above
+	if apiGroupVersion.Version != "" {
+		apiVersion = apiGroupVersion.Version
 	}
 
 	unstructuredMachineList := &unstructured.UnstructuredList{}
@@ -121,7 +123,7 @@ func (m *MachineHandler) getAPIGroupPreferredVersion(apiGroup string) (string, e
 		}
 	}
 
-	return "", ErrApiVersionNotFound
+	return "", ErrApiGroupNotFound
 }
 
 // FindMatchingMachineFromInternalDNS find matching machine for node using internal DNS
