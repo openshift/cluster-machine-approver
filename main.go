@@ -63,6 +63,9 @@ func main() {
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
+	// Set logger for controller-runtime
+	control.SetLogger(klog.NewKlogr())
+
 	klog.InitFlags(nil)
 	flagSet.AddGoFlagSet(goflag.CommandLine)
 
