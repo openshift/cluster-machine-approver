@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 const (
@@ -145,7 +146,9 @@ func main() {
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
 	mgr, err := manager.New(workloadConfig, manager.Options{
-		MetricsBindAddress:            metricsPort,
+		Metrics: server.Options{
+			BindAddress: metricsPort,
+		},
 		LeaderElectionNamespace:       leaderElectResourceNamespace,
 		LeaderElection:                leaderElect,
 		LeaseDuration:                 &leaderElectLeaseDuration,
