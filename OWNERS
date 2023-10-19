@@ -7,14 +7,14 @@ approvers:
 - damdo
 - elmiko
 - enxebre
-- lobziik
 reviewers:
 - JoelSpeed
 - RadekManak
 - damdo
 - elmiko
-- enxebre
-- lobziik
+- nrb
 - odvarkadaniel
+- racheljpg
+- vincepri
 component: Cloud Compute
 subcomponent: Other Provider
