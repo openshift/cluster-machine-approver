@@ -178,6 +178,8 @@ func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, nodes
 	atomic.StoreUint32(&MaxPendingCSRs, uint32(maxPending))
 	pending := recentlyPendingCSRs(csrs.Items)
 	atomic.StoreUint32(&PendingCSRs, uint32(pending))
+	pendingNodeCertificates := recentlyPendingNodeCSRs(csrs.Items)
+	atomic.StoreUint32(&PendingNodeCSRs, uint32(pendingNodeCertificates))
 	if pending > maxPending {
 		klog.Errorf("%v: Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", csrName, pending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
 		return true

@@ -53,6 +53,7 @@ var now = time.Now
 
 var MaxPendingCSRs uint32
 var PendingCSRs uint32
+var PendingNodeCSRs uint32
 
 func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
@@ -494,6 +495,34 @@ func isApprovedByCMA(csr certificatesv1.CertificateSigningRequest) bool {
 		}
 	}
 	return false
+}
+
+func recentlyPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) int {
+	// assumes we are scheduled on the master meaning our clock is the same
+	currentTime := now()
+	start := currentTime.Add(-maxPendingDelta)
+	end := currentTime.Add(maxMachineClockSkew)
+
+	var pending int
+
+	for _, csr := range csrs {
+		parsedCSR, err := parseCSR(&csr)
+		if err != nil {
+			continue
+		}
+		// ignore "old" CSRs
+		if !inTimeSpan(start, end, csr.CreationTimestamp.Time) {
+			continue
+		}
+
+		// Perform the same check the authorizeCSR function uses
+		if !isApproved(csr) && isNodeClientCert(&csr, parsedCSR) {
+			pending++
+		}
+	}
+
+	return pending
+
 }
 
 func recentlyPendingCSRs(csrs []certificatesv1.CertificateSigningRequest) int {
