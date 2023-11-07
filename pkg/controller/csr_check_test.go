@@ -1882,12 +1882,27 @@ func TestGetServingCert(t *testing.T) {
 	}
 }
 
-func TestRecentlyPendingCSRs(t *testing.T) {
-	approvedCSR := certificatesv1.CertificateSigningRequest{
+func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
+	approvedNodeBootstrapperCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username: nodeBootstrapperUsername,
+			Groups:   nodeBootstrapperGroups.List(),
+		},
 		Status: certificatesv1.CertificateSigningRequestStatus{
 			Conditions: []certificatesv1.CertificateSigningRequestCondition{{
 				Type: certificatesv1.CertificateApproved,
 			}},
+		},
+	}
+	pendingNodeBootstrapperCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username: nodeBootstrapperUsername,
+			Groups:   nodeBootstrapperGroups.List(),
+		},
+	}
+	pendingNodeServerCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username: nodeUserPrefix + "clustername-abcde-master-us-west-1a-0",
 		},
 	}
 	pendingCSR := certificatesv1.CertificateSigningRequest{}
@@ -1906,44 +1921,56 @@ func TestRecentlyPendingCSRs(t *testing.T) {
 		expectPending int
 	}{
 		{
-			name:          "recently pending csr",
-			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, pendingCSR)},
+			name:          "recently pending Node bootstrapper csr",
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, pendingNodeBootstrapperCSR)},
 			expectPending: 1,
 		},
 		{
+			name:          "recently pending Node csr",
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, pendingNodeServerCSR)},
+			expectPending: 1,
+		},
+		{
+			name:          "recently pending unknown csr",
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, pendingCSR)},
+			expectPending: 0,
+		},
+		{
 			name:          "recently approved csr",
-			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, approvedCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, approvedNodeBootstrapperCSR)},
 			expectPending: 0,
 		},
 		{
 			name:          "pending past approval time",
-			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pastApprovalTime, pendingCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pastApprovalTime, pendingNodeBootstrapperCSR)},
 			expectPending: 0,
 		},
 		{
 			name:          "pending before approval time",
-			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(preApprovalTime, pendingCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(preApprovalTime, pendingNodeBootstrapperCSR)},
 			expectPending: 0,
 		},
 		{
 			name: "multiple different csrs",
 			csrs: []certificatesv1.CertificateSigningRequest{
-				createdAt(pendingTime, pendingCSR),
-				createdAt(pendingTime, pendingCSR),
+				createdAt(pendingTime, pendingNodeBootstrapperCSR),
+				createdAt(pendingTime, pendingNodeBootstrapperCSR),
+				createdAt(pendingTime, pendingNodeServerCSR),
 
-				createdAt(pendingTime, approvedCSR),
-				createdAt(preApprovalTime, approvedCSR),
-				createdAt(pastApprovalTime, approvedCSR),
-				createdAt(preApprovalTime, pendingCSR),
-				createdAt(pastApprovalTime, pendingCSR),
+				createdAt(pendingTime, pendingCSR),
+				createdAt(pendingTime, approvedNodeBootstrapperCSR),
+				createdAt(preApprovalTime, approvedNodeBootstrapperCSR),
+				createdAt(pastApprovalTime, approvedNodeBootstrapperCSR),
+				createdAt(preApprovalTime, pendingNodeBootstrapperCSR),
+				createdAt(pastApprovalTime, pendingNodeBootstrapperCSR),
 			},
-			expectPending: 2,
+			expectPending: 3,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if pending := recentlyPendingCSRs(tt.csrs); pending != tt.expectPending {
+			if pending := recentlyPendingNodeCSRs(tt.csrs); pending != tt.expectPending {
 				t.Errorf("Expected %v pending CSRs, got: %v", tt.expectPending, pending)
 			}
 		})
