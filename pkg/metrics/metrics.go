@@ -10,7 +10,7 @@ import (
 )
 
 // defaultMetricsPort is the default port to expose metrics.
-const DefaultMetricsPort = "127.0.0.1:9191"
+const DefaultMetricsPort = ":9191"
 
 var (
 	// CurrentPendingCSRCountDesc is a metric to report count of pending node CSRs in the cluster
