@@ -490,7 +490,7 @@ func isApprovedByCMA(csr certificatesv1.CertificateSigningRequest) bool {
 	return false
 }
 
-func recentlyPendingCSRs(csrs []certificatesv1.CertificateSigningRequest) int {
+func recentlyPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) int {
 	// assumes we are scheduled on the master meaning our clock is the same
 	currentTime := now()
 	start := currentTime.Add(-maxPendingDelta)
@@ -504,12 +504,16 @@ func recentlyPendingCSRs(csrs []certificatesv1.CertificateSigningRequest) int {
 			continue
 		}
 
-		if !isApproved(csr) {
+		if (isReqFromNodeBootstrapper(&csr) || isRequestFromNodeUser(csr)) && !isApproved(csr) {
 			pending++
 		}
 	}
 
 	return pending
+}
+
+func isRequestFromNodeUser(csr certificatesv1.CertificateSigningRequest) bool {
+	return strings.HasPrefix(csr.Spec.Username, nodeUserPrefix)
 }
 
 // getServingCert fetches the node by the given name and attempts to connect to

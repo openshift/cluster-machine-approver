@@ -13,10 +13,10 @@ import (
 const DefaultMetricsPort = ":9191"
 
 var (
-	// CurrentPendingCSRCountDesc is a metric to report count of the pending csr in the cluster
-	CurrentPendingCSRCountDesc = prometheus.NewDesc("mapi_current_pending_csr", "Count of pending CSRs at the cluster level", nil, nil)
-	// MaxPendingCSRDesc is a metric to report threshold value of the pending csr beyond which csr will be ignored
-	MaxPendingCSRDesc = prometheus.NewDesc("mapi_max_pending_csr", "Threshold value of the pending CSRs beyond which any new CSR requests will be ignored ", nil, nil)
+	// CurrentPendingCSRCountDesc is a metric to report count of pending node CSRs in the cluster
+	CurrentPendingCSRCountDesc = prometheus.NewDesc("mapi_current_pending_csr", "Count of recently pending node CSRs at the cluster level", nil, nil)
+	// MaxPendingCSRDesc is a metric to report threshold value of the pending node CSRs beyond which all CSR will be ignored by machine approver
+	MaxPendingCSRDesc = prometheus.NewDesc("mapi_max_pending_csr", "Threshold value of the pending node CSRs beyond which all CSR will be ignored by machine approver", nil, nil)
 )
 
 func init() {
