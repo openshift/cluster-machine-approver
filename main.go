@@ -55,6 +55,8 @@ func main() {
 	var machineNamespace string
 	var workloadKubeConfigPath string
 	var disableStatusController bool
+	var maxConcurrentReconciles int
+
 	var leaderElect bool
 	var leaderElectLeaseDuration time.Duration
 	var leaderElectRenewDeadline time.Duration
@@ -76,6 +78,7 @@ func main() {
 	flagSet.StringVar(&machineNamespace, "machine-namespace", "", "restrict machine operations to a specific namespace, if not set, all machines will be observed in approval decisions")
 	flagSet.StringVar(&workloadKubeConfigPath, "workload-cluster-kubeconfig", "", "workload kubeconfig path")
 	flagSet.BoolVar(&disableStatusController, "disable-status-controller", false, "disable status controller that will update the machine-approver clusteroperator status")
+	flagSet.IntVar(&maxConcurrentReconciles, "max-concurrent-reconciles", 1, "maximum number concurrent reconciles for the CSR approving controller")
 
 	flagSet.BoolVar(&leaderElect, "leader-elect", true, "use leader election when starting the manager.")
 	flagSet.DurationVar(&leaderElectLeaseDuration, "leader-elect-lease-duration", 137*time.Second, "the duration that non-leader candidates will wait to force acquire leadership.")
@@ -211,7 +214,9 @@ func main() {
 		NodeRestCfg:      workloadConfig,
 		Config:           controller.LoadConfig(cliConfig),
 		APIGroupVersions: parsedAPIGroupVersions,
-	}).SetupWithManager(mgr, ctrl.Options{}); err != nil {
+	}).SetupWithManager(mgr, ctrl.Options{
+		MaxConcurrentReconciles: maxConcurrentReconciles,
+	}); err != nil {
 		klog.Fatalf("unable to create CSR controller: %v", err)
 	}
 
