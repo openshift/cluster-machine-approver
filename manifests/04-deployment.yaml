@@ -70,6 +70,7 @@ spec:
         - "--leader-elect-retry-period=26s"
         - "--leader-elect-resource-namespace=openshift-cluster-machine-approver"
         - "--api-group-version=machine.openshift.io/v1beta1"
+        - "--max-concurrent-reconciles=10"
         resources:
           requests:
             memory: 50Mi
