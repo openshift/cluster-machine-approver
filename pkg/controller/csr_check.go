@@ -266,7 +266,7 @@ func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machin
 
 	if nodeMachine.Status.NodeRef != nil {
 		//TODO: set annotation/emit event here.
-		klog.Errorf("%v: machine for node %v already has node ref, cannot approve", nodeMachine.Status.NodeRef)
+		klog.Errorf("%v: machine for node %v already has node ref, cannot approve", req.Name, nodeMachine.Status.NodeRef)
 		return false, nil
 	}
 
