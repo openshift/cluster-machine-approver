@@ -37,7 +37,7 @@ import (
 var serverCertGood, serverKeyGood, rootCertGood string
 
 // Generated CRs, are populating within the init func
-var goodCSR, goodCSRECDSA, extraAddr, otherName, noNamePrefix, noGroup, clientGood, clientExtraO, clientWithDNS, clientWrongCN, clientEmptyName, emptyCSR string
+var goodCSR, goodCSRECDSA, extraAddr, otherName, noNamePrefix, noGroup, clientGood, clientExtraO, clientWithDNS, clientWrongCN, clientEmptyName, emptyCSR, multusCSRPEM string
 
 var presetTimeCorrect, presetTimeExpired time.Time
 
@@ -116,6 +116,7 @@ func init() {
 	clientWrongCN = createCSR("system:notnode:zebra", defaultOrgs, []net.IP{}, []string{})
 	clientEmptyName = createCSR("system:node:", defaultOrgs, []net.IP{}, []string{})
 	emptyCSR = "-----BEGIN??\n"
+	multusCSRPEM = createCSR("system:multus:", defaultOrgs, []net.IP{}, []string{})
 }
 
 func generateCertKeyPair(duration time.Duration, parentCertPEM, parentKeyPEM []byte, commonName string, otherNames ...string) ([]byte, []byte, error) {
@@ -1948,6 +1949,13 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 		},
 	}
 	pendingCSR := certificatesv1.CertificateSigningRequest{}
+	multusCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username: nodeUserPrefix + "clustername-abcde-master-us-west-1a-0",
+			Request:  []byte(multusCSRPEM),
+		},
+	}
+
 	pendingTime := baseTime.Add(time.Second)
 	pastApprovalTime := baseTime.Add(-maxPendingDelta)
 	preApprovalTime := baseTime.Add(10 * time.Second)
@@ -1993,6 +2001,11 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 			expectPending: 0,
 		},
 		{
+			name:          "multus node CSR",
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, multusCSR)},
+			expectPending: 0,
+		},
+		{
 			name: "multiple different csrs",
 			csrs: []certificatesv1.CertificateSigningRequest{
 				createdAt(pendingTime, pendingNodeBootstrapperCSR),
@@ -2001,6 +2014,7 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 
 				createdAt(pendingTime, pendingCSR),
 				createdAt(pendingTime, approvedNodeBootstrapperCSR),
+				createdAt(pendingTime, multusCSR),
 				createdAt(preApprovalTime, approvedNodeBootstrapperCSR),
 				createdAt(pastApprovalTime, approvedNodeBootstrapperCSR),
 				createdAt(preApprovalTime, pendingNodeBootstrapperCSR),
