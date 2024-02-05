@@ -71,6 +71,7 @@ spec:
         - "--leader-elect-resource-name=capi-cluster-machine-approver-leader"
         - "--api-group-version=cluster.x-k8s.io/v1beta1"
         - "--disable-status-controller=true"
+        - "--max-concurrent-reconciles=10"
         resources:
           requests:
             memory: 50Mi
