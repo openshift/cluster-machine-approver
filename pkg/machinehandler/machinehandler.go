@@ -9,6 +9,7 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	corev1 "k8s.io/api/core/v1"
+	k8serror "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -53,16 +54,23 @@ func (m *MachineHandler) ListMachines(apiGroupVersion schema.GroupVersion) ([]Ma
 
 	// we set group version to user provided one
 	// if not, set preffered version from discovery above
-	if apiGroupVersion.Version != "" {
-		apiVersion = apiGroupVersion.Version
+	if apiGroupVersion.Version == "" {
+		apiGroupVersion.Version = apiVersion
+	}
+
+	// Detect if machine api present in the cluster
+	// If it's not then return empty array because
+	// there are no machines present
+	present, err := isMachineCRDPresent(m.Config, apiGroupVersion)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
 	}
 
 	unstructuredMachineList := &unstructured.UnstructuredList{}
-	unstructuredMachineList.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   apiGroupVersion.Group,
-		Kind:    "MachineList",
-		Version: apiVersion,
-	})
+	unstructuredMachineList.SetGroupVersionKind(apiGroupVersion.WithKind("MachineList"))
 	listOpts := make([]client.ListOption, 0)
 	if m.Namespace != "" {
 		listOpts = append(listOpts, client.InNamespace(m.Namespace))
@@ -75,8 +83,8 @@ func (m *MachineHandler) ListMachines(apiGroupVersion schema.GroupVersion) ([]Ma
 
 	stringToTimeHook := func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
 		if f.Kind() == reflect.String && t == reflect.TypeOf(metav1.Time{}) {
-			time, err := time.Parse(time.RFC3339, data.(string))
-			return metav1.Time{Time: time}, err
+			t, err := time.Parse(time.RFC3339, data.(string))
+			return metav1.Time{Time: t}, err
 		}
 		return data, nil
 	}
@@ -124,6 +132,28 @@ func (m *MachineHandler) getAPIGroupPreferredVersion(apiGroup string) (string, e
 	}
 
 	return "", ErrApiGroupNotFound
+}
+
+func isMachineCRDPresent(cfg *rest.Config, groupVersion schema.GroupVersion) (bool, error) {
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return false, fmt.Errorf("create discovery client failed: %v", err)
+	}
+
+	res, err := discoveryClient.ServerResourcesForGroupVersion(groupVersion.String())
+	if err != nil {
+		if k8serror.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	for _, resource := range res.APIResources {
+		if resource.Kind == "Machine" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // FindMatchingMachineFromInternalDNS find matching machine for node using internal DNS
