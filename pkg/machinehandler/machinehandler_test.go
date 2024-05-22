@@ -3,7 +3,7 @@ package machinehandler
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -67,13 +67,28 @@ func (f fakeMachineRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 				  }
 			]
 		}`
+	} else if strings.HasSuffix(req.URL.Path, "/apis/machine.openshift.io/v1beta1") ||
+		strings.HasSuffix(req.URL.Path, "/apis/cluster.x-k8s.io/v1alpha4") {
+		data = strings.ReplaceAll(`{
+			"kind": "APIResourceList",
+			"apiVersion": "v1",
+			"GroupVersion": "${API_GROUP_VERSION}",
+			"resources": [
+				{
+					"name": "machines",
+					"kind": "Machine"
+				}
+			]
+		}`, "${API_GROUP_VERSION}", strings.SplitAfter(req.URL.Path, "/apis/")[1])
 	}
+
 	res := &http.Response{
 		StatusCode: 200,
-		Body:       ioutil.NopCloser(bytes.NewBufferString(data)),
+		Body:       io.NopCloser(bytes.NewBufferString(data)),
 	}
 	return res, nil
 }
+
 func createUnstructuredMachine(apiVersion, name, namespace, ip, nodeName string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -108,8 +123,8 @@ func Test_authorizeCSR(t *testing.T) {
 	capiMachine1 := createUnstructuredMachine("cluster.x-k8s.io/v1alpha4", "capi-machine1", "capi-machine1", "10.0.128.123", "ip-10-0-128-123.ec2.internal")
 	capiMachine2 := createUnstructuredMachine("cluster.x-k8s.io/v1alpha4", "capi-machine2", "capi-machine2", "10.0.128.124", "ip-10-0-128-124.ec2.internal")
 	ocpMachine1 := createUnstructuredMachine("machine.openshift.io/v1beta1", "ocp-machine1", "ocp-machine1", "10.0.172.123", "ip-10-0-172-123.ec2.internal")
-	ocpmachine2 := createUnstructuredMachine("machine.openshift.io/v1beta1", "ocp-machine2", "ocp-machine2", "10.0.172.124", "ip-10-0-172-124.ec2.internal")
-	cl := fake.NewClientBuilder().WithObjects(capiMachine1, capiMachine2, ocpMachine1, ocpmachine2).Build()
+	ocpMachine2 := createUnstructuredMachine("machine.openshift.io/v1beta1", "ocp-machine2", "ocp-machine2", "10.0.172.124", "ip-10-0-172-124.ec2.internal")
+	cl := fake.NewClientBuilder().WithObjects(capiMachine1, capiMachine2, ocpMachine1, ocpMachine2).Build()
 	type args struct {
 		apiGroup  string
 		client    client.Client
@@ -177,5 +192,4 @@ func Test_authorizeCSR(t *testing.T) {
 			}
 		})
 	}
-
 }
