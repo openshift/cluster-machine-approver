@@ -832,6 +832,33 @@ func Test_authorizeCSR(t *testing.T) {
 			authorize: true,
 		},
 		{
+			name: "client good with upper case DNS",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "TIGERS"}),
+					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "PANDA"}),
+				},
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
 			name: "client extra O",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
