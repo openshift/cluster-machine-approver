@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/mitchellh/mapstructure"
@@ -130,7 +131,7 @@ func (m *MachineHandler) getAPIGroupPreferredVersion(apiGroup string) (string, e
 func FindMatchingMachineFromInternalDNS(machines []Machine, nodeName string) (*Machine, error) {
 	for _, machine := range machines {
 		for _, address := range machine.Status.Addresses {
-			if corev1.NodeAddressType(address.Type) == corev1.NodeInternalDNS && address.Address == nodeName {
+			if corev1.NodeAddressType(address.Type) == corev1.NodeInternalDNS && strings.EqualFold(address.Address, nodeName) {
 				return &machine, nil
 			}
 		}
