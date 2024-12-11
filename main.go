@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	goflag "flag"
 	"fmt"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
 	flag "github.com/spf13/pflag"
+	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
@@ -165,6 +167,13 @@ func main() {
 		klog.Fatalf("unable to set up overall controller manager: %v", err)
 	}
 
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &certificatesv1.CertificateSigningRequest{}, "spec.signerName", func(rawObj client.Object) []string {
+		csr := rawObj.(*certificatesv1.CertificateSigningRequest)
+		return []string{csr.Spec.SignerName}
+	}); err != nil {
+		klog.Fatalf("failed to index field spec.signerName: %v", err)
+	}
+
 	klog.Info("registering components")
 
 	klog.Info("setting up scheme")
@@ -207,10 +216,10 @@ func main() {
 	// Setup all Controllers
 	klog.Info("setting up controllers")
 	if err = (&controller.CertificateApprover{
-		MachineClient:    uncachedManagementClient,
+		ManagementClient: uncachedManagementClient,
 		MachineRestCfg:   managementConfig,
 		MachineNamespace: machineNamespace,
-		NodeClient:       uncachedWorkloadClient,
+		WorkloadClient:   uncachedWorkloadClient,
 		NodeRestCfg:      workloadConfig,
 		Config:           controller.LoadConfig(cliConfig),
 		APIGroupVersions: parsedAPIGroupVersions,

@@ -36,6 +36,8 @@ const (
 
 	nodeBootstrapperUsername = "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper"
 
+	signerNameField = "spec.signerName"
+
 	maxMachineClockSkew = 10 * time.Second
 	maxMachineDelta     = 2 * time.Hour
 
@@ -43,10 +45,18 @@ const (
 	networkClusterName      = "cluster"
 )
 
+var clientKubeletFieldSelector = fmt.Sprintf("%s=%s", signerNameField, certificatesv1.KubeAPIServerClientKubeletSignerName)
+var kubeletServingFieldSelector = fmt.Sprintf("%s=%s", signerNameField, certificatesv1.KubeletServingSignerName)
+
 var nodeBootstrapperGroups = sets.NewString(
 	"system:serviceaccounts:openshift-machine-config-operator",
 	"system:serviceaccounts",
 	"system:authenticated",
+)
+
+var nodeServingGroups = sets.NewString(
+	"system:authenticated",
+	"system:nodes",
 )
 
 var now = time.Now
@@ -510,7 +520,7 @@ func recentlyPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) in
 			continue
 		}
 
-		if (isReqFromNodeBootstrapper(&csr) || isRequestFromNodeUser(csr) && !isRequestFromMultus(csr)) && !isApproved(csr) {
+		if pendingNodeCertFilter(&csr) {
 			pending++
 		}
 	}
@@ -520,16 +530,6 @@ func recentlyPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) in
 
 func isRequestFromNodeUser(csr certificatesv1.CertificateSigningRequest) bool {
 	return strings.HasPrefix(csr.Spec.Username, nodeUserPrefix)
-}
-
-func isRequestFromMultus(csr certificatesv1.CertificateSigningRequest) bool {
-	parsedCSR, err := parseCSR(&csr)
-	if err != nil {
-		klog.Errorf("%v: Failed to parse csr: %v", csr.Name, err)
-		return false
-	}
-
-	return strings.HasPrefix(parsedCSR.Subject.CommonName, "system:multus:")
 }
 
 // getServingCert fetches the node by the given name and attempts to connect to

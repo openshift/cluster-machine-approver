@@ -2012,8 +2012,9 @@ func TestGetServingCert(t *testing.T) {
 func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 	approvedNodeBootstrapperCSR := certificatesv1.CertificateSigningRequest{
 		Spec: certificatesv1.CertificateSigningRequestSpec{
-			Username: nodeBootstrapperUsername,
-			Groups:   nodeBootstrapperGroups.List(),
+			SignerName: certificatesv1.KubeAPIServerClientKubeletSignerName,
+			Username:   nodeBootstrapperUsername,
+			Groups:     nodeBootstrapperGroups.List(),
 		},
 		Status: certificatesv1.CertificateSigningRequestStatus{
 			Conditions: []certificatesv1.CertificateSigningRequestCondition{{
@@ -2023,20 +2024,40 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 	}
 	pendingNodeBootstrapperCSR := certificatesv1.CertificateSigningRequest{
 		Spec: certificatesv1.CertificateSigningRequestSpec{
-			Username: nodeBootstrapperUsername,
-			Groups:   nodeBootstrapperGroups.List(),
+			SignerName: certificatesv1.KubeAPIServerClientKubeletSignerName,
+			Username:   nodeBootstrapperUsername,
+			Groups:     nodeBootstrapperGroups.List(),
 		},
 	}
 	pendingNodeServerCSR := certificatesv1.CertificateSigningRequest{
 		Spec: certificatesv1.CertificateSigningRequestSpec{
-			Username: nodeUserPrefix + "clustername-abcde-master-us-west-1a-0",
+			Username:   nodeUserPrefix + "clustername-abcde-master-us-west-1a-0",
+			SignerName: certificatesv1.KubeletServingSignerName,
+			Groups:     nodeServingGroups.List(),
 		},
 	}
-	pendingCSR := certificatesv1.CertificateSigningRequest{}
-	multusCSR := certificatesv1.CertificateSigningRequest{
+	pendingCSR := certificatesv1.CertificateSigningRequest{
 		Spec: certificatesv1.CertificateSigningRequestSpec{
-			Username: nodeUserPrefix + "clustername-abcde-master-us-west-1a-0",
-			Request:  []byte(multusCSRPEM),
+			SignerName: certificatesv1.KubeAPIServerClientKubeletSignerName,
+		},
+	}
+	pendingOtherClientKubelet := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username:   "multus-pod",
+			SignerName: certificatesv1.KubeAPIServerClientKubeletSignerName,
+			Request:    []byte(multusCSRPEM),
+		},
+	}
+	pendingOtherApiserverClient := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username:   "otherUsername",
+			SignerName: certificatesv1.KubeAPIServerClientSignerName,
+		},
+	}
+	pendingOtherKubeletServing := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username:   "otherUsername",
+			SignerName: certificatesv1.KubeletServingSignerName,
 		},
 	}
 
@@ -2086,7 +2107,16 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 		},
 		{
 			name:          "multus node CSR",
-			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, multusCSR)},
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, pendingOtherClientKubelet)},
+			expectPending: 0,
+		},
+		{
+			name: "csrs unrelated to machines",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				createdAt(pendingTime, pendingCSR),
+				createdAt(pendingTime, pendingOtherClientKubelet),
+				createdAt(pendingTime, pendingOtherApiserverClient),
+				createdAt(pendingTime, pendingOtherKubeletServing)},
 			expectPending: 0,
 		},
 		{
@@ -2098,7 +2128,7 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 
 				createdAt(pendingTime, pendingCSR),
 				createdAt(pendingTime, approvedNodeBootstrapperCSR),
-				createdAt(pendingTime, multusCSR),
+				createdAt(pendingTime, pendingOtherClientKubelet),
 				createdAt(preApprovalTime, approvedNodeBootstrapperCSR),
 				createdAt(pastApprovalTime, approvedNodeBootstrapperCSR),
 				createdAt(preApprovalTime, pendingNodeBootstrapperCSR),
