@@ -161,7 +161,7 @@ func isMachineCRDPresent(cfg *rest.Config, groupVersion schema.GroupVersion) (bo
 func FindMatchingMachineFromInternalDNS(machines []Machine, nodeName string) (*Machine, error) {
 	for _, machine := range machines {
 		for _, address := range machine.Status.Addresses {
-			if corev1.NodeAddressType(address.Type) == corev1.NodeInternalDNS && strings.EqualFold(address.Address, nodeName) {
+			if corev1.NodeAddressType(address.Type) == corev1.NodeInternalDNS && strings.EqualFold(strings.TrimSuffix(address.Address, "."), nodeName) {
 				return &machine, nil
 			}
 		}
