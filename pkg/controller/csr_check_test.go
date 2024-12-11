@@ -805,6 +805,36 @@ func Test_authorizeCSR(t *testing.T) {
 			authorize: false,
 		},
 		{
+			name: "csr-san-dns-trailing-period",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("test", []corev1.NodeAddress{
+						{corev1.NodeInternalIP, "127.0.0.1"},
+						{corev1.NodeExternalIP, "10.0.0.1"},
+						{corev1.NodeExternalDNS, "node1.local."},
+						{corev1.NodeExternalDNS, "node1"},
+					}...),
+				},
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr: goodCSR,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
 			name: "client good",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
