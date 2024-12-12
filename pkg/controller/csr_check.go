@@ -381,7 +381,7 @@ func authorizeServingCertWithMachine(machines []machinehandlerpkg.Machine, req *
 		for _, addr := range targetMachine.Status.Addresses {
 			switch addr.Type {
 			case corev1.NodeInternalDNS, corev1.NodeExternalDNS, corev1.NodeHostName:
-				if strings.EqualFold(san, addr.Address) {
+				if strings.EqualFold(san, strings.TrimSuffix(addr.Address, ".")) {
 					foundSan = true
 					break
 				} else {
