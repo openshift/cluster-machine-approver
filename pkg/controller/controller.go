@@ -11,8 +11,10 @@ import (
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 	certificatesv1client "k8s.io/client-go/kubernetes/typed/certificates/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
@@ -34,10 +36,10 @@ const (
 
 // MachineApproverReconciler reconciles a machine-approver  object
 type CertificateApprover struct {
-	NodeClient  client.Client
-	NodeRestCfg *rest.Config
+	WorkloadClient client.Client
+	NodeRestCfg    *rest.Config
 
-	MachineClient    client.Client
+	ManagementClient client.Client
 	MachineRestCfg   *rest.Config
 	MachineNamespace string
 
@@ -53,9 +55,9 @@ func (m *CertificateApprover) buildWithManager(mgr ctrl.Manager, options control
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(options).
 		For(&certificatesv1.CertificateSigningRequest{}, builder.WithPredicates(predicate.Funcs{
-			CreateFunc:  func(e event.CreateEvent) bool { return pendingCertFilter(e.Object) },
-			UpdateFunc:  func(e event.UpdateEvent) bool { return pendingCertFilter(e.ObjectNew) },
-			GenericFunc: func(e event.GenericEvent) bool { return pendingCertFilter(e.Object) },
+			CreateFunc:  func(e event.CreateEvent) bool { return pendingNodeCertFilter(e.Object) },
+			UpdateFunc:  func(e event.UpdateEvent) bool { return pendingNodeCertFilter(e.ObjectNew) },
+			GenericFunc: func(e event.GenericEvent) bool { return pendingNodeCertFilter(e.Object) },
 			DeleteFunc:  func(e event.DeleteEvent) bool { return false },
 		})).
 		Watches(
@@ -69,27 +71,54 @@ func (m *CertificateApprover) buildWithManager(mgr ctrl.Manager, options control
 			})).Complete(c)
 }
 
-func pendingCertFilter(obj runtime.Object) bool {
+// pendingNodeCertFilter filters CSRs that need to be reconciled
+func pendingNodeCertFilter(obj runtime.Object) bool {
 	cert, ok := obj.(*certificatesv1.CertificateSigningRequest)
-	return ok && !isApproved(*cert) || (isRecentlyApproved(*cert) && !isApprovedByCMA(*cert))
+	// Reconcile unapproved or approved by another controller to update our metrics
+	reconcileRequired := ok && (!isApproved(*cert) || (isRecentlyApproved(*cert) && !isApprovedByCMA(*cert)))
+
+	if !reconcileRequired {
+		return false
+	}
+
+	switch cert.Spec.SignerName {
+	case certificatesv1.KubeletServingSignerName:
+		groupSet := sets.NewString(cert.Spec.Groups...)
+		// Reconcile kubernetes.io/kubelet-serving when it has the system:nodes group
+		if !groupSet.Has(nodeGroup) {
+			klog.V(3).Infof("%s: Ignoring csr because it does not have the system:nodes group", cert.Name)
+			return false
+		}
+	case certificatesv1.KubeAPIServerClientKubeletSignerName:
+		// Reconcile kubernetes.io/kube-apiserver-client-kubelet when it is created by the node bootstrapper
+		if cert.Spec.Username != nodeBootstrapperUsername {
+			klog.V(3).Infof("%s: Ignoring csr because it is not from the node bootstrapper", cert.Name)
+			return false
+		}
+	default:
+		// Ignore all other CSRs
+		klog.V(3).Infof("%s: Ignoring csr because of unsupported signerName: %s", cert.Name, cert.Spec.SignerName)
+		return false
+	}
+
+	return true
 }
 
 func (m *CertificateApprover) toCSRs(ctx context.Context, obj client.Object) []reconcile.Request {
 	requests := []reconcile.Request{}
-	list := &certificatesv1.CertificateSigningRequestList{}
-	err := m.NodeClient.List(ctx, list)
+	csrs, err := listNodeCSRs(ctx, m.WorkloadClient)
 	if err != nil {
-		klog.Errorf("Unable to list pending CSRs: %v", err)
+		klog.Errorf("Unable to list CSRs: %v", err)
 		return nil
 	}
-	for _, csr := range list.Items {
+
+	for _, csr := range csrs {
 		// Only reconcile pending or recently approved by another controller
-		if isApproved(csr) && (!isRecentlyApproved(csr) || isApprovedByCMA(csr)) {
-			continue
+		if pendingNodeCertFilter(&csr) {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: client.ObjectKey{Name: csr.Name},
+			})
 		}
-		requests = append(requests, reconcile.Request{
-			NamespacedName: client.ObjectKey{Name: csr.Name},
-		})
 	}
 
 	return requests
@@ -115,16 +144,34 @@ func caConfigMapFilter(obj runtime.Object, new runtime.Object) bool {
 		cmData != cmDataNew
 }
 
+func listNodeCSRs(ctx context.Context, ctrlClient client.Client) ([]certificatesv1.CertificateSigningRequest, error) {
+	csrList := &certificatesv1.CertificateSigningRequestList{}
+	csrs := []certificatesv1.CertificateSigningRequest{}
+
+	if err := ctrlClient.List(ctx, csrList, &client.ListOptions{FieldSelector: fields.OneTermEqualSelector(signerNameField, certificatesv1.KubeAPIServerClientKubeletSignerName)}); err != nil {
+		return nil, fmt.Errorf("failed to get CSRs: %w", err)
+	}
+	csrs = append(csrs, csrList.Items...)
+
+	if err := ctrlClient.List(ctx, csrList, &client.ListOptions{FieldSelector: fields.OneTermEqualSelector(signerNameField, certificatesv1.KubeletServingSignerName)}); err != nil {
+		return nil, fmt.Errorf("failed to get CSRs: %w", err)
+	}
+	csrs = append(csrs, csrList.Items...)
+
+	return csrs, nil
+}
+
 func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (reconcile.Result, error) {
-	csrs := &certificatesv1.CertificateSigningRequestList{}
 	klog.Infof("Reconciling CSR: %v", req.Name)
-	if err := m.NodeClient.List(ctx, csrs); err != nil {
-		klog.Errorf("%v: Failed to list CSRs: %v", req.Name, err)
-		return reconcile.Result{}, fmt.Errorf("Failed to get CSRs: %w", err)
+
+	csrs, err := listNodeCSRs(ctx, m.WorkloadClient)
+	if err != nil {
+		klog.Errorf("%v: failed to list CSRs: %v", req.Name, err)
+		return reconcile.Result{}, fmt.Errorf("%v: failed to list CSRs: %w", req.Name, err)
 	}
 
 	machineHandler := &machinehandlerpkg.MachineHandler{
-		Client:    m.MachineClient,
+		Client:    m.ManagementClient,
 		Config:    m.MachineRestCfg,
 		Ctx:       ctx,
 		Namespace: m.MachineNamespace,
@@ -142,7 +189,7 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	nodes := &corev1.NodeList{}
-	if err := m.NodeClient.List(ctx, nodes); err != nil {
+	if err := m.WorkloadClient.List(ctx, nodes); err != nil {
 		klog.Errorf("%v: Failed to list Nodes: %v", req.Name, err)
 		return reconcile.Result{}, fmt.Errorf("Failed to get Nodes: %w", err)
 	}
@@ -152,7 +199,7 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 		return reconcile.Result{}, nil
 	}
 
-	for _, csr := range csrs.Items {
+	for _, csr := range csrs {
 		if csr.Name == req.Name {
 			if err := m.reconcileCSR(csr, machines); err != nil {
 				return reconcile.Result{}, fmt.Errorf("could not reconcile CSR: %v", err)
@@ -173,10 +220,10 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // reconcileLimits will short circut logic if number of pending CSRs is exceeding limit
-func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, nodes *corev1.NodeList, csrs *certificatesv1.CertificateSigningRequestList) bool {
+func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, nodes *corev1.NodeList, csrs []certificatesv1.CertificateSigningRequest) bool {
 	maxPending := getMaxPending(machines, nodes)
 	atomic.StoreUint32(&MaxPendingCSRs, uint32(maxPending))
-	pending := recentlyPendingNodeCSRs(csrs.Items)
+	pending := recentlyPendingNodeCSRs(csrs)
 	atomic.StoreUint32(&PendingCSRs, uint32(pending))
 	if pending > maxPending {
 		klog.Errorf("%v: Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", csrName, pending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
@@ -195,12 +242,19 @@ func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machin
 		return fmt.Errorf("could not initialise certificates client: %v", err)
 	}
 
-	certificates, err := certClient.CertificateSigningRequests().List(context.Background(), metav1.ListOptions{})
+	clientCertificates, err := certClient.CertificateSigningRequests().List(context.Background(), metav1.ListOptions{FieldSelector: clientKubeletFieldSelector})
 	if err != nil {
 		return fmt.Errorf("could not list CSRs: %v", err)
 	}
 
-	reconcileLimits(csrName, machines, nodes, certificates)
+	servingCertificates, err := certClient.CertificateSigningRequests().List(context.Background(), metav1.ListOptions{FieldSelector: kubeletServingFieldSelector})
+	if err != nil {
+		return fmt.Errorf("could not list CSRs: %v", err)
+	}
+
+	csrs := clientCertificates.Items
+	csrs = append(csrs, servingCertificates.Items...)
+	reconcileLimits(csrName, machines, nodes, csrs)
 	return nil
 }
 
@@ -227,7 +281,7 @@ func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigning
 		klog.Errorf("failed to get kubelet CA")
 	}
 
-	if authorize, err := authorizeCSR(m.NodeClient, m.Config, machines, &csr, parsedCSR, kubeletCA); !authorize {
+	if authorize, err := authorizeCSR(m.WorkloadClient, m.Config, machines, &csr, parsedCSR, kubeletCA); !authorize {
 		// Don't deny since it might be someone else's CSR
 		klog.Infof("%s: CSR not authorized", csr.Name)
 		return err
@@ -249,7 +303,7 @@ func (m *CertificateApprover) getKubeletCA() *x509.CertPool {
 		Namespace: configNamespace,
 		Name:      kubeletCAConfigMap,
 	}
-	if err := m.NodeClient.Get(context.Background(), key, configMap); err != nil {
+	if err := m.WorkloadClient.Get(context.Background(), key, configMap); err != nil {
 		klog.Errorf("failed to get kubelet CA: %v", err)
 		return nil
 	}
