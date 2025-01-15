@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -38,6 +39,7 @@ var _ = Describe("Cluster Operator status controller", func() {
 	var osClient *osclientset.Clientset
 	var statusController *statusController
 	var stop chan struct{}
+	var coCreated sync.WaitGroup
 
 	BeforeEach(func() {
 		By("Running the controller")
@@ -48,8 +50,11 @@ var _ = Describe("Cluster Operator status controller", func() {
 
 		stop = make(chan struct{})
 		statusController = NewStatusController(cfg)
+		coCreated = sync.WaitGroup{}
+		coCreated.Add(1)
 		go func() {
 			defer GinkgoRecover()
+			coCreated.Wait()
 			statusController.Run(1, stop)
 		}()
 	})
@@ -90,6 +95,7 @@ var _ = Describe("Cluster Operator status controller", func() {
 				_, err := osClient.ConfigV1().ClusterOperators().Create(context.Background(), tc.existingCO, metav1.CreateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 			}
+			coCreated.Done() // Ensure that existingCO is created before starting the statusController.
 
 			var co *osconfigv1.ClusterOperator
 			Eventually(func() (bool, error) {
