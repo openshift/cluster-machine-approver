@@ -3,8 +3,8 @@
 package internal
 
 import (
-	"fmt"
-	"sync"
+	fmt "fmt"
+	sync "sync"
 
 	typed "sigs.k8s.io/structured-merge-diff/v4/typed"
 )
@@ -323,14 +323,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.AuthenticationStatus
   map:
     fields:
@@ -353,6 +351,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: oauthAPIServer
       type:
         namedType: com.github.openshift.api.operator.v1.OAuthAPIServerStatus
@@ -457,14 +458,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.CSISnapshotControllerStatus
   map:
     fields:
@@ -487,6 +486,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -571,14 +573,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.CloudCredentialStatus
   map:
     fields:
@@ -601,6 +601,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -649,7 +652,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -659,7 +661,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.ClusterCSIDriverStatus
   map:
     fields:
@@ -682,6 +683,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -736,14 +740,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.ConfigStatus
   map:
     fields:
@@ -766,6 +768,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -883,7 +888,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -904,7 +908,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.ConsoleStatus
   map:
     fields:
@@ -927,6 +930,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -1238,7 +1244,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -1248,7 +1253,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.EtcdStatus
   map:
     fields:
@@ -1405,7 +1409,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: lastGatherTime
       type:
         namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
-      default: {}
 - name: com.github.openshift.api.operator.v1.GathererStatus
   map:
     fields:
@@ -1418,7 +1421,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: lastGatherDuration
       type:
         namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Duration
-      default: 0
     - name: name
       type:
         scalar: string
@@ -1540,7 +1542,21 @@ var schemaYAML = typed.YAMLObject(`types:
 - name: com.github.openshift.api.operator.v1.IPsecConfig
   map:
     fields:
+    - name: full
+      type:
+        namedType: com.github.openshift.api.operator.v1.IPsecFullModeConfig
     - name: mode
+      type:
+        scalar: string
+    unions:
+    - discriminator: mode
+      fields:
+      - fieldName: full
+        discriminatorValue: Full
+- name: com.github.openshift.api.operator.v1.IPsecFullModeConfig
+  map:
+    fields:
+    - name: encapsulation
       type:
         scalar: string
 - name: com.github.openshift.api.operator.v1.IPv4GatewayConfig
@@ -1773,6 +1789,10 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: httpHeaders
       type:
         namedType: com.github.openshift.api.operator.v1.IngressControllerHTTPHeaders
+    - name: idleConnectionTerminationPolicy
+      type:
+        scalar: string
+      default: Immediate
     - name: logging
       type:
         namedType: com.github.openshift.api.operator.v1.IngressControllerLogging
@@ -1801,7 +1821,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.IngressControllerStatus
   map:
     fields:
@@ -1916,14 +1935,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.InsightsOperatorStatus
   map:
     fields:
@@ -1954,6 +1971,9 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         namedType: com.github.openshift.api.operator.v1.InsightsReport
       default: {}
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -1970,7 +1990,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: downloadedAt
       type:
         namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
-      default: {}
     - name: healthChecks
       type:
         list:
@@ -2018,7 +2037,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -2028,7 +2046,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.KubeAPIServerStatus
   map:
     fields:
@@ -2122,7 +2139,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -2132,7 +2148,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: useMoreSecureServiceCA
       type:
         scalar: boolean
@@ -2224,7 +2239,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -2234,7 +2248,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.KubeSchedulerStatus
   map:
     fields:
@@ -2315,14 +2328,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.KubeStorageVersionMigratorStatus
   map:
     fields:
@@ -2345,6 +2356,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -2462,7 +2476,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -2472,7 +2485,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.MachineConfigurationStatus
   map:
     fields:
@@ -2631,7 +2643,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
@@ -2644,7 +2655,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: useMultiNetworkPolicy
       type:
         scalar: boolean
@@ -2670,6 +2680,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -2902,6 +2915,81 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: latestAvailableRevision
       type:
         scalar: numeric
+- name: com.github.openshift.api.operator.v1.OLM
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+      default: {}
+    - name: spec
+      type:
+        namedType: com.github.openshift.api.operator.v1.OLMSpec
+      default: {}
+    - name: status
+      type:
+        namedType: com.github.openshift.api.operator.v1.OLMStatus
+      default: {}
+- name: com.github.openshift.api.operator.v1.OLMSpec
+  map:
+    fields:
+    - name: logLevel
+      type:
+        scalar: string
+    - name: managementState
+      type:
+        scalar: string
+      default: ""
+    - name: observedConfig
+      type:
+        namedType: __untyped_atomic_
+    - name: operatorLogLevel
+      type:
+        scalar: string
+    - name: unsupportedConfigOverrides
+      type:
+        namedType: __untyped_atomic_
+- name: com.github.openshift.api.operator.v1.OLMStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: com.github.openshift.api.operator.v1.OperatorCondition
+          elementRelationship: associative
+          keys:
+          - type
+    - name: generations
+      type:
+        list:
+          elementType:
+            namedType: com.github.openshift.api.operator.v1.GenerationStatus
+          elementRelationship: associative
+          keys:
+          - group
+          - resource
+          - namespace
+          - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
+    - name: observedGeneration
+      type:
+        scalar: numeric
+    - name: readyReplicas
+      type:
+        scalar: numeric
+      default: 0
+    - name: version
+      type:
+        scalar: string
 - name: com.github.openshift.api.operator.v1.OVNKubernetesConfig
   map:
     fields:
@@ -2978,14 +3066,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.OpenShiftAPIServerStatus
   map:
     fields:
@@ -3055,14 +3141,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.OpenShiftControllerManagerStatus
   map:
     fields:
@@ -3085,6 +3169,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -3114,13 +3201,18 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: vxlanPort
       type:
         scalar: numeric
+- name: com.github.openshift.api.operator.v1.OpenStackLoadBalancerParameters
+  map:
+    fields:
+    - name: floatingIP
+      type:
+        scalar: string
 - name: com.github.openshift.api.operator.v1.OperatorCondition
   map:
     fields:
     - name: lastTransitionTime
       type:
         namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
-      default: {}
     - name: message
       type:
         scalar: string
@@ -3233,6 +3325,9 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: ibm
       type:
         namedType: com.github.openshift.api.operator.v1.IBMLoadBalancerParameters
+    - name: openstack
+      type:
+        namedType: com.github.openshift.api.operator.v1.OpenStackLoadBalancerParameters
     - name: type
       type:
         scalar: string
@@ -3246,6 +3341,8 @@ var schemaYAML = typed.YAMLObject(`types:
         discriminatorValue: GCP
       - fieldName: ibm
         discriminatorValue: IBM
+      - fieldName: openstack
+        discriminatorValue: OpenStack
 - name: com.github.openshift.api.operator.v1.ProxyConfig
   map:
     fields:
@@ -3380,14 +3477,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.ServiceCAStatus
   map:
     fields:
@@ -3410,6 +3505,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -3454,14 +3552,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.ServiceCatalogAPIServerStatus
   map:
     fields:
@@ -3484,6 +3580,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -3528,14 +3627,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1.ServiceCatalogControllerManagerStatus
   map:
     fields:
@@ -3558,6 +3655,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -3680,14 +3780,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: vsphereStorageDriver
       type:
         scalar: string
@@ -3714,6 +3812,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -3803,6 +3904,39 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         scalar: string
       default: ""
+- name: com.github.openshift.api.operator.v1alpha1.ClusterVersionOperator
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+      default: {}
+    - name: spec
+      type:
+        namedType: com.github.openshift.api.operator.v1alpha1.ClusterVersionOperatorSpec
+      default: {}
+    - name: status
+      type:
+        namedType: com.github.openshift.api.operator.v1alpha1.ClusterVersionOperatorStatus
+      default: {}
+- name: com.github.openshift.api.operator.v1alpha1.ClusterVersionOperatorSpec
+  map:
+    fields:
+    - name: operatorLogLevel
+      type:
+        scalar: string
+- name: com.github.openshift.api.operator.v1alpha1.ClusterVersionOperatorStatus
+  map:
+    fields:
+    - name: observedGeneration
+      type:
+        scalar: numeric
 - name: com.github.openshift.api.operator.v1alpha1.EtcdBackup
   map:
     fields:
@@ -3905,14 +4039,12 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: observedConfig
       type:
         namedType: __untyped_atomic_
-      default: {}
     - name: operatorLogLevel
       type:
         scalar: string
     - name: unsupportedConfigOverrides
       type:
         namedType: __untyped_atomic_
-      default: {}
 - name: com.github.openshift.api.operator.v1alpha1.OLMStatus
   map:
     fields:
@@ -3935,6 +4067,9 @@ var schemaYAML = typed.YAMLObject(`types:
           - resource
           - namespace
           - name
+    - name: latestAvailableRevision
+      type:
+        scalar: numeric
     - name: observedGeneration
       type:
         scalar: numeric
@@ -3958,12 +4093,42 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         scalar: string
       default: ""
+- name: io.k8s.api.authorization.v1.FieldSelectorAttributes
+  map:
+    fields:
+    - name: rawSelector
+      type:
+        scalar: string
+    - name: requirements
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.FieldSelectorRequirement
+          elementRelationship: atomic
+- name: io.k8s.api.authorization.v1.LabelSelectorAttributes
+  map:
+    fields:
+    - name: rawSelector
+      type:
+        scalar: string
+    - name: requirements
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement
+          elementRelationship: atomic
 - name: io.k8s.api.authorization.v1.ResourceAttributes
   map:
     fields:
+    - name: fieldSelector
+      type:
+        namedType: io.k8s.api.authorization.v1.FieldSelectorAttributes
     - name: group
       type:
         scalar: string
+    - name: labelSelector
+      type:
+        namedType: io.k8s.api.authorization.v1.LabelSelectorAttributes
     - name: name
       type:
         scalar: string
@@ -4014,7 +4179,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: lastTransitionTime
       type:
         namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
-      default: {}
     - name: message
       type:
         scalar: string
@@ -4036,6 +4200,23 @@ var schemaYAML = typed.YAMLObject(`types:
       default: ""
 - name: io.k8s.apimachinery.pkg.apis.meta.v1.Duration
   scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.FieldSelectorRequirement
+  map:
+    fields:
+    - name: key
+      type:
+        scalar: string
+      default: ""
+    - name: operator
+      type:
+        scalar: string
+      default: ""
+    - name: values
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
 - name: io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1
   map:
     elementType:
@@ -4115,7 +4296,6 @@ var schemaYAML = typed.YAMLObject(`types:
     - name: creationTimestamp
       type:
         namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
-      default: {}
     - name: deletionGracePeriodSeconds
       type:
         scalar: numeric
