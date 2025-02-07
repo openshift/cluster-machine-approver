@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	control "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -230,7 +231,8 @@ func main() {
 	}
 
 	if !disableStatusController {
-		statusController := NewStatusController(mgr.GetConfig())
+		mgrClock := clock.RealClock{}
+		statusController := NewStatusController(mgr.GetConfig(), mgrClock)
 		go func() {
 			<-mgr.Elected()
 			statusController.Run(1, stop)

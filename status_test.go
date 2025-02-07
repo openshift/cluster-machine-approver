@@ -29,6 +29,7 @@ import (
 	"github.com/openshift/library-go/pkg/config/clusteroperator/v1helpers"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/clock"
 )
 
 const (
@@ -49,7 +50,8 @@ var _ = Describe("Cluster Operator status controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		stop = make(chan struct{})
-		statusController = NewStatusController(cfg)
+		testClock := clock.RealClock{}
+		statusController = NewStatusController(cfg, testClock)
 		coCreated = sync.WaitGroup{}
 		coCreated.Add(1)
 		go func() {
