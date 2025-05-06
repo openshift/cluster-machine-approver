@@ -270,7 +270,7 @@ func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machin
 	nodeMachine, err := machinehandlerpkg.FindMatchingMachineFromInternalDNS(machines, nodeName)
 	if err != nil {
 		//TODO: set annotation/emit event here.
-		klog.Errorf("%v: failed to find machine for node %s, cannot approve", req.Name, nodeName)
+		klog.Errorf("%v: failed to find machine with InternalDNS matching %s, cannot approve", req.Name, nodeName)
 		return false, fmt.Errorf("failed to find machine for node %s", nodeName)
 	}
 
