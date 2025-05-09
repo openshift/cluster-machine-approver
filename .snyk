@@ -4,3 +4,4 @@
 exclude:
   global:
     - "vendor/**"
+    - "pkg/controller/csr_check_test.go"
