@@ -80,7 +80,7 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 	// - system:nodes
 	// - system:authenticated
 	if len(req.Spec.Groups) < 2 {
-		return "", fmt.Errorf("Too few groups")
+		return "", fmt.Errorf("too few groups")
 	}
 	groupSet := sets.NewString(req.Spec.Groups...)
 	if !groupSet.HasAll(nodeGroup, "system:authenticated") {
@@ -102,7 +102,7 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 	// - key encipherment
 	if len(req.Spec.Usages) != len(validationUsageSetLegacy) && len(req.Spec.Usages) != len(validationUsageSet) {
 		// - server auth
-		return "", fmt.Errorf("Too few usages")
+		return "", fmt.Errorf("too few usages")
 	}
 
 	usages := make([]string, len(req.Spec.Usages))
@@ -117,7 +117,7 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 
 	// Check subject: O = system:nodes, CN = system:node:ip-10-0-152-205.ec2.internal
 	if csr.Subject.CommonName != req.Spec.Username {
-		return "", fmt.Errorf("Mismatched CommonName %s != %s", csr.Subject.CommonName, req.Spec.Username)
+		return "", fmt.Errorf("mismatched CommonName %s != %s", csr.Subject.CommonName, req.Spec.Username)
 	}
 
 	var hasOrg bool
@@ -128,7 +128,7 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 		}
 	}
 	if !hasOrg {
-		return "", fmt.Errorf("Organization %v doesn't include %s", csr.Subject.Organization, nodeGroup)
+		return "", fmt.Errorf("organization %v doesn't include %s", csr.Subject.Organization, nodeGroup)
 	}
 
 	return nodeAsking, nil
@@ -376,7 +376,7 @@ func authorizeServingCertWithMachine(machines []machinehandlerpkg.Machine, req *
 		klog.Errorf("%v: Serving Cert: No target machine for node %q", req.Name, nodeAsking)
 		//TODO: set annotation/emit event here.
 		// Return error so we requeue in case we're racing with node linker.
-		return fmt.Errorf("Unable to find machine for node")
+		return fmt.Errorf("unable to find machine for node")
 	}
 
 	// SAN checks for both DNS and IPs, e.g.,
