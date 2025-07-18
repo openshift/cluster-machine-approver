@@ -528,10 +528,6 @@ func recentlyPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) in
 	return pending
 }
 
-func isRequestFromNodeUser(csr certificatesv1.CertificateSigningRequest) bool {
-	return strings.HasPrefix(csr.Spec.Username, nodeUserPrefix)
-}
-
 // getServingCert fetches the node by the given name and attempts to connect to
 // its kubelet on the first advertised address.
 //
