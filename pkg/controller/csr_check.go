@@ -386,22 +386,23 @@ func authorizeServingCertWithMachine(machines []machinehandlerpkg.Machine, req *
 		if len(san) == 0 {
 			continue
 		}
-		var attemptedAddresses []string
-		var foundSan bool
-		for _, addr := range targetMachine.Status.Addresses {
-			switch addr.Type {
-			case corev1.NodeInternalDNS, corev1.NodeExternalDNS, corev1.NodeHostName:
-				if strings.EqualFold(san, strings.TrimSuffix(addr.Address, ".")) {
-					foundSan = true
-					break
-				} else {
-					attemptedAddresses = append(attemptedAddresses, addr.Address)
+		if foundSan, attemptedAddresses := func() (bool, []string) {
+			var attemptedAddresses []string
+			for _, addr := range targetMachine.Status.Addresses {
+				switch addr.Type {
+				case corev1.NodeInternalDNS, corev1.NodeExternalDNS, corev1.NodeHostName:
+					if strings.EqualFold(san, strings.TrimSuffix(addr.Address, ".")) {
+						return true, nil
+					} else {
+						attemptedAddresses = append(attemptedAddresses, addr.Address)
+					}
+				default:
 				}
-			default:
 			}
-		}
-		// The CSR requested a DNS name that did not belong to the machine
-		if !foundSan {
+			return false, attemptedAddresses
+		}(); !foundSan {
+			// The CSR requested a DNS name that did not belong to the machine
+
 			//TODO: set annotation/emit event here.
 			// return error so we requeue, in case machine network is out of date
 			// for some reason
@@ -414,22 +415,23 @@ func authorizeServingCertWithMachine(machines []machinehandlerpkg.Machine, req *
 		if len(san) == 0 {
 			continue
 		}
-		var attemptedAddresses []string
-		var foundSan bool
-		for _, addr := range targetMachine.Status.Addresses {
-			switch corev1.NodeAddressType(addr.Type) {
-			case corev1.NodeInternalIP, corev1.NodeExternalIP:
-				if san.String() == addr.Address {
-					foundSan = true
-					break
-				} else {
-					attemptedAddresses = append(attemptedAddresses, addr.Address)
+		if foundSan, attemptedAddresses := func() (bool, []string) {
+			var attemptedAddresses []string
+			for _, addr := range targetMachine.Status.Addresses {
+				switch corev1.NodeAddressType(addr.Type) {
+				case corev1.NodeInternalIP, corev1.NodeExternalIP:
+					if san.String() == addr.Address {
+						return true, nil
+					} else {
+						attemptedAddresses = append(attemptedAddresses, addr.Address)
+					}
+				default:
 				}
-			default:
 			}
-		}
-		// The CSR requested an IP name that did not belong to the machine
-		if !foundSan {
+			return false, attemptedAddresses
+		}(); !foundSan {
+			// The CSR requested an IP name that did not belong to the machine
+
 			//TODO: set annotation/emit event here.
 			// return error so we requeue, in case machine network is out of date
 			// for some reason
