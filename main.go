@@ -127,7 +127,7 @@ func main() {
 
 	for _, parsedAPIGroupVersion := range parsedAPIGroupVersions {
 		if err := validateAPIGroup(parsedAPIGroupVersion.Group); err != nil {
-			klog.Fatalf(err.Error())
+			klog.Fatalf("%s", err.Error())
 		}
 	}
 
