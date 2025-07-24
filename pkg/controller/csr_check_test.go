@@ -449,7 +449,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: Unable to find machine for node",
+			wantErr:   "could not authorize CSR: exhausted all authorization methods: unable to find machine for node",
 			authorize: false,
 		},
 		{
@@ -1536,7 +1536,7 @@ func Test_authorizeCSR(t *testing.T) {
 				ca:            []*x509.Certificate{parseCert(t, differentCert)},
 				kubeletServer: fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort+1), differentCert, differentKey),
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: [current serving cert has bad common name, Unable to find machine for node]",
+			wantErr:   "could not authorize CSR: exhausted all authorization methods: [current serving cert has bad common name, unable to find machine for node]",
 			authorize: false,
 		},
 		{
@@ -1562,7 +1562,7 @@ func Test_authorizeCSR(t *testing.T) {
 				hostSubnet:  hostSubnet("test"),
 				ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: [CSR Subject Alternate Name values do not match current certificate, Unable to find machine for node, CSR Subject Alternate Names includes unknown IP addresses]",
+			wantErr:   "could not authorize CSR: exhausted all authorization methods: [CSR Subject Alternate Name values do not match current certificate, unable to find machine for node, CSR Subject Alternate Names includes unknown IP addresses]",
 			authorize: false,
 		},
 		{
