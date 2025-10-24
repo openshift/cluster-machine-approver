@@ -84,6 +84,8 @@ spec:
           value: "0.0.1-snapshot"
         - name: METRICS_PORT
           value: "9193"
+        - name: METRICS_BIND_ADDRESS
+          value: "127.0.0.1"
         terminationMessagePolicy: FallbackToLogsOnError
       volumes:
       - configMap:
@@ -91,7 +93,7 @@ spec:
         name: auth-proxy-config
       - name: machine-approver-tls
         secret:
-          secretName: machine-approver-tls
+          secretName: machine-approver-capi-tls
       - name: config
         configMap:
           defaultMode: 440
