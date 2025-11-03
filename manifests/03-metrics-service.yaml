@@ -21,3 +21,29 @@ spec:
   selector:
     app: machine-approver
   sessionAffinity: None
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: machine-approver-capi
+  namespace: openshift-cluster-machine-approver
+  annotations:
+    include.release.openshift.io/hypershift: "true"
+    include.release.openshift.io/ibm-cloud-managed: "true"
+    include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
+    service.alpha.openshift.io/serving-cert-secret-name: machine-approver-capi-tls
+    release.openshift.io/feature-set: "TechPreviewNoUpgrade,CustomNoUpgrade"
+  labels:
+    app: machine-approver-capi
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: https
+    port: 9194
+    targetPort: https
+  selector:
+    app: machine-approver-capi
+  sessionAffinity: None

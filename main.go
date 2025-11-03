@@ -141,7 +141,11 @@ func main() {
 		if err != nil {
 			klog.Fatalf("Error parsing METRICS_PORT (%q) environment variable: %v", port, err)
 		}
-		metricsPort = fmt.Sprintf(":%d", v)
+		if bindAddr, ok := os.LookupEnv("METRICS_BIND_ADDRESS"); ok && bindAddr != "" {
+			metricsPort = fmt.Sprintf("%s:%d", bindAddr, v)
+		} else {
+			metricsPort = fmt.Sprintf(":%d", v)
+		}
 	}
 
 	managementConfig, workloadConfig, err := createClientConfigs(managementKubeConfigPath, workloadKubeConfigPath)
