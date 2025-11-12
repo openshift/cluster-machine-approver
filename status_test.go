@@ -49,6 +49,19 @@ var _ = Describe("Cluster Operator status controller", func() {
 		osClient, err = osclientset.NewForConfig(cfg)
 		Expect(err).NotTo(HaveOccurred())
 
+		// Ensure clean state before each test
+		err = osClient.ConfigV1().ClusterOperators().Delete(context.Background(), clusterOperatorName, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			Expect(err).ToNot(HaveOccurred())
+		}
+		Eventually(func() error {
+			_, err := osClient.ConfigV1().ClusterOperators().Get(context.Background(), clusterOperatorName, metav1.GetOptions{})
+			if err != nil && apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}, timeout).Should(Succeed())
+
 		stop = make(chan struct{})
 		testClock := clock.RealClock{}
 		statusController = NewStatusController(cfg, testClock)
@@ -66,7 +79,9 @@ var _ = Describe("Cluster Operator status controller", func() {
 		os.Unsetenv(releaseVersionEnvVariableName)
 
 		err := osClient.ConfigV1().ClusterOperators().Delete(context.Background(), clusterOperatorName, metav1.DeleteOptions{})
-		Expect(err).ToNot(HaveOccurred())
+		if err != nil && !apierrors.IsNotFound(err) {
+			Expect(err).ToNot(HaveOccurred())
+		}
 		Eventually(func() error {
 			_, err := osClient.ConfigV1().ClusterOperators().Get(context.Background(), clusterOperatorName, metav1.GetOptions{})
 			if err != nil && apierrors.IsNotFound(err) {
