@@ -15,6 +15,9 @@ status:
   - group: certificates.k8s.io
     name: ""
     resource: certificatesigningrequests
+  - group: rbac.authorization.k8s.io
+    name: system:openshift:controller:machine-approver
+    resource: clusterroles
   versions:
     - name: operator
       version: "0.0.1-snapshot"

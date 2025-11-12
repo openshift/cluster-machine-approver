@@ -46,6 +46,11 @@ var relatedObjects = []osconfigv1.ObjectReference{
 		Resource: "certificatesigningrequests",
 		Name:     "",
 	},
+	{
+		Group:    "rbac.authorization.k8s.io",
+		Resource: "clusterroles",
+		Name:     "system:openshift:controller:machine-approver",
+	},
 }
 
 type statusController struct {
