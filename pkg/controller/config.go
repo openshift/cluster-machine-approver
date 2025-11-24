@@ -2,7 +2,7 @@ package controller
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 
 	kyaml "k8s.io/apimachinery/pkg/util/yaml"
 
@@ -28,7 +28,7 @@ func LoadConfig(cliConfig string) ClusterMachineApproverConfig {
 		return config
 	}
 
-	content, err := ioutil.ReadFile(cliConfig)
+	content, err := os.ReadFile(cliConfig)
 	if err != nil {
 		klog.Infof("using default as failed to load config %s: %v", cliConfig, err)
 		return config
