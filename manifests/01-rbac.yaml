@@ -193,6 +193,14 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - config.openshift.io
+  resources:
+  - apiservers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - network.openshift.io
   resources:
   - hostsubnets
