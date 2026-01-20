@@ -9,8 +9,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
-// defaultMetricsPort is the default port to expose metrics.
-const DefaultMetricsPort = "127.0.0.1:9191"
+// DefaultMetricsBindAddress is the default address to expose metrics.
+const DefaultMetricsBindAddress = "0.0.0.0:9192"
 
 var (
 	// CurrentPendingCSRCountDesc is a metric to report count of pending node CSRs in the cluster
