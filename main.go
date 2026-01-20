@@ -22,7 +22,6 @@ import (
 	goflag "flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +69,7 @@ func main() {
 	var leaderElectRetryPeriod time.Duration
 	var leaderElectResourceName string
 	var leaderElectResourceNamespace string
+	var metricsBindAddress string
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
@@ -98,6 +98,7 @@ func main() {
 	flagSet.DurationVar(&leaderElectRetryPeriod, "leader-elect-retry-period", 26*time.Second, "the duration the LeaderElector clients should wait between tries of actions.")
 	flagSet.StringVar(&leaderElectResourceName, "leader-elect-resource-name", "cluster-machine-approver-leader", "the name of the resource that leader election will use for holding the leader lock.")
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
+	flagSet.StringVar(&metricsBindAddress, "metrics-bind-address", metrics.DefaultMetricsBindAddress, "the address the metrics endpoint binds to.")
 
 	// Deprecated options
 	flagSet.StringVar(&apiGroup, "apigroup", "", "API group for machines")
@@ -143,19 +144,6 @@ func main() {
 	// Now let's start the controller
 	stop := make(chan struct{})
 	defer close(stop)
-
-	metricsPort := metrics.DefaultMetricsPort
-	if port, ok := os.LookupEnv("METRICS_PORT"); ok {
-		v, err := strconv.Atoi(port)
-		if err != nil {
-			klog.Fatalf("Error parsing METRICS_PORT (%q) environment variable: %v", port, err)
-		}
-		if bindAddr, ok := os.LookupEnv("METRICS_BIND_ADDRESS"); ok && bindAddr != "" {
-			metricsPort = fmt.Sprintf("%s:%d", bindAddr, v)
-		} else {
-			metricsPort = fmt.Sprintf(":%d", v)
-		}
-	}
 
 	managementConfig, workloadConfig, err := createClientConfigs(managementKubeConfigPath, workloadKubeConfigPath)
 	if err != nil {
