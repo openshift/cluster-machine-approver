@@ -25,3 +25,4 @@ spec:
   selector:
     matchLabels:
       app: machine-approver
+  serviceDiscoveryRole: EndpointSlice
