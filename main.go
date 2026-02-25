@@ -18,10 +18,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	goflag "flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,9 +29,11 @@ import (
 	networkv1 "github.com/openshift/api/network/v1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
+	utiltls "github.com/openshift/controller-runtime-common/pkg/tls"
 	flag "github.com/spf13/pflag"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -42,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
@@ -66,11 +69,17 @@ func main() {
 	var leaderElectRetryPeriod time.Duration
 	var leaderElectResourceName string
 	var leaderElectResourceNamespace string
+	var metricsBindAddress string
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
 	// Set logger for controller-runtime
 	control.SetLogger(klog.NewKlogr())
+
+	scheme := runtime.NewScheme()
+	if err := configv1.AddToScheme(scheme); err != nil {
+		klog.Fatalf("unable to add configv1 to scheme: %v", err)
+	}
 
 	klog.InitFlags(nil)
 	flagSet.AddGoFlagSet(goflag.CommandLine)
@@ -89,6 +98,7 @@ func main() {
 	flagSet.DurationVar(&leaderElectRetryPeriod, "leader-elect-retry-period", 26*time.Second, "the duration the LeaderElector clients should wait between tries of actions.")
 	flagSet.StringVar(&leaderElectResourceName, "leader-elect-resource-name", "cluster-machine-approver-leader", "the name of the resource that leader election will use for holding the leader lock.")
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
+	flagSet.StringVar(&metricsBindAddress, "metrics-bind-address", metrics.DefaultMetricsBindAddress, "the address the metrics endpoint binds to.")
 
 	// Deprecated options
 	flagSet.StringVar(&apiGroup, "apigroup", "", "API group for machines")
@@ -135,29 +145,41 @@ func main() {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	metricsPort := metrics.DefaultMetricsPort
-	if port, ok := os.LookupEnv("METRICS_PORT"); ok {
-		v, err := strconv.Atoi(port)
-		if err != nil {
-			klog.Fatalf("Error parsing METRICS_PORT (%q) environment variable: %v", port, err)
-		}
-		if bindAddr, ok := os.LookupEnv("METRICS_BIND_ADDRESS"); ok && bindAddr != "" {
-			metricsPort = fmt.Sprintf("%s:%d", bindAddr, v)
-		} else {
-			metricsPort = fmt.Sprintf(":%d", v)
-		}
-	}
-
 	managementConfig, workloadConfig, err := createClientConfigs(managementKubeConfigPath, workloadKubeConfigPath)
 	if err != nil {
 		klog.Fatalf("Can't set client configs: %v", err)
 	}
 
+	k8sClient, err := client.New(managementConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		klog.Fatalf("unable to create Kubernetes client: %v", err)
+	}
+
+	// Fetch the TLS profile from the APIServer resource.
+	tlsSecurityProfileSpec, err := utiltls.FetchAPIServerTLSProfile(context.Background(), k8sClient)
+	if err != nil {
+		klog.Fatalf("unable to get TLS profile from API server: %v", err)
+	}
+
+	// Create the TLS configuration function for the server endpoints.
+	tlsConfig, unsupportedCiphers := utiltls.NewTLSConfigFromProfile(tlsSecurityProfileSpec)
+	if len(unsupportedCiphers) > 0 {
+		klog.Infof("TLS configuration contains unsupported ciphers that will be ignored: %v", unsupportedCiphers)
+	}
+
+	// Create a context that can be cancelled when there is a need to shut down the manager	.
+	ctx, cancel := context.WithCancel(control.SetupSignalHandler())
+	// Ensure the context is cancelled when the program exits.
+	defer cancel()
+
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
 	mgr, err := manager.New(workloadConfig, manager.Options{
 		Metrics: server.Options{
-			BindAddress: metricsPort,
+			BindAddress:    metricsBindAddress,
+			SecureServing:  true,
+			FilterProvider: filters.WithAuthenticationAndAuthorization,
+			TLSOpts:        []func(*tls.Config){tlsConfig},
 		},
 		LeaderElectionNamespace:       leaderElectResourceNamespace,
 		LeaderElection:                leaderElect,
@@ -244,9 +266,25 @@ func main() {
 		statusController.versionGetter.SetVersion(operatorVersionKey, getReleaseVersion())
 	}
 
+	// Set up the TLS security profile watcher controller.
+	// This will trigger a graceful shutdown when the TLS profile changes.
+	if err := (&utiltls.SecurityProfileWatcher{
+		Client:                mgr.GetClient(),
+		InitialTLSProfileSpec: tlsSecurityProfileSpec,
+		OnProfileChange: func(ctx context.Context, oldTLSProfileSpec, newTLSProfileSpec configv1.TLSProfileSpec) {
+			klog.Infof("TLS profile has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
+				"old profile", oldTLSProfileSpec,
+				"new profile", newTLSProfileSpec,
+			)
+			cancel()
+		},
+	}).SetupWithManager(mgr); err != nil {
+		klog.Fatalf("unable to create TLS security profile watcher controller: %v", err)
+	}
+
 	// Start the Cmd
 	klog.Info("starting the cmd")
-	if err := mgr.Start(control.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		klog.Fatalf("unable to run the manager: %v", err)
 	}
 }
