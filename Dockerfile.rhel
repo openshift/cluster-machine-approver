@@ -1,17 +1,19 @@
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-openshift-4.22 AS builder
 WORKDIR /go/src/github.com/openshift/cluster-machine-approver
 COPY . .
-RUN make build
+RUN make build && \
+    gzip bin/cluster-machine-approver-ext
 
 FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
 COPY --from=builder /go/src/github.com/openshift/cluster-machine-approver/machine-approver /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/cluster-machine-approver/bin/cluster-machine-approver-ext.gz /usr/bin/
 COPY manifests /manifests
 ENTRYPOINT ["/usr/bin/machine-approver"]
-LABEL io.k8s.display-name="OpenShift cluster-machine-approver" \
+LABEL io.k8s.display-name="OpenShift Cluster Machine Approver" \
       io.k8s.description="This is an OpenShift component for approving new machines" \
       com.redhat.component="cluster-machine-approver" \
       maintainer="OpenShift Auth Team <aos-auth-team@redhat.com>" \
       name="openshift/ose-cluster-machine-approver" \
       version="v4.0.0" \
-      io.openshift.tags="openshift" \
-      io.openshift.release.operator=true
+      io.openshift.release.operator=true \
+      io.openshift.tags="openshift,tests,e2e,e2e-extension"

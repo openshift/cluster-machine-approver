@@ -36,7 +36,7 @@ else
   IMAGE_BUILD_CMD = $(ENGINE) build
 endif
 
-all build:
+all build: tests-ext
 	$(DOCKER_CMD) go build -o machine-approver .
 .PHONY: all build
 
@@ -65,6 +65,10 @@ clean:
 test-e2e: ## Run e2e tests
 	hack/e2e.sh
 .PHONY: test-e2e
+
+tests-ext: ## Build OpenShift Tests Extension binary
+	cd openshift-tests-extension && go build -mod=vendor -o ../bin/cluster-machine-approver-ext ./cmd
+.PHONY: tests-ext
 
 .PHONY: vendor
 vendor:
