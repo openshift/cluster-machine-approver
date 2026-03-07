@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"os"
-	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -39,8 +38,9 @@ const (
 var _ = Describe("Cluster Operator status controller", func() {
 	var osClient *osclientset.Clientset
 	var statusController *statusController
-	var stop chan struct{}
-	var coCreated sync.WaitGroup
+	var stop chan struct{}           // signals the controller goroutine to stop
+	var done chan struct{}           // closed when the controller goroutine has exited
+	var startController chan struct{} // closed by the test body to start the controller after any pre-existing CO is created
 
 	BeforeEach(func() {
 		By("Running the controller")
@@ -63,19 +63,26 @@ var _ = Describe("Cluster Operator status controller", func() {
 		}, timeout).Should(Succeed())
 
 		stop = make(chan struct{})
+		done = make(chan struct{})
+		startController = make(chan struct{})
 		testClock := clock.RealClock{}
 		statusController = NewStatusController(cfg, testClock)
-		coCreated = sync.WaitGroup{}
-		coCreated.Add(1)
+		// The select on stop allows AfterEach to unblock the goroutine
+		// even if the test fails before closing startController.
 		go func() {
 			defer GinkgoRecover()
-			coCreated.Wait()
-			statusController.Run(1, stop)
+			defer close(done)
+			select {
+			case <-startController:
+				statusController.Run(1, stop)
+			case <-stop:
+			}
 		}()
 	})
 
 	AfterEach(func() {
-		close(stop)
+		close(stop) // signal the controller to stop
+		<-done      // wait for the goroutine to fully exit before cleanup
 		os.Unsetenv(releaseVersionEnvVariableName)
 
 		err := osClient.ConfigV1().ClusterOperators().Delete(context.Background(), clusterOperatorName, metav1.DeleteOptions{})
@@ -112,7 +119,7 @@ var _ = Describe("Cluster Operator status controller", func() {
 				_, err := osClient.ConfigV1().ClusterOperators().Create(context.Background(), tc.existingCO, metav1.CreateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 			}
-			coCreated.Done() // Ensure that existingCO is created before starting the statusController.
+			close(startController) // Ensure that existingCO is created before starting the statusController.
 
 			var co *osconfigv1.ClusterOperator
 			Eventually(func() (bool, error) {
