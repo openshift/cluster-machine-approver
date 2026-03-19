@@ -30,6 +30,7 @@ import (
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
 	utiltls "github.com/openshift/controller-runtime-common/pkg/tls"
+	libgocrypto "github.com/openshift/library-go/pkg/crypto"
 	flag "github.com/spf13/pflag"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -155,16 +156,30 @@ func main() {
 		klog.Fatalf("unable to create Kubernetes client: %v", err)
 	}
 
+	// Fetch the TLS adherence policy from the APIServer resource.
+	// This will be used to determine if the components should honor the cluster-wide TLS profile.
+	tlsAdherencePolicy, err := utiltls.FetchAPIServerTLSAdherencePolicy(context.Background(), k8sClient)
+	if err != nil {
+		klog.Fatalf("unable to get TLS adherence policy from API server: %v", err)
+	}
+
 	// Fetch the TLS profile from the APIServer resource.
 	tlsSecurityProfileSpec, err := utiltls.FetchAPIServerTLSProfile(context.Background(), k8sClient)
 	if err != nil {
 		klog.Fatalf("unable to get TLS profile from API server: %v", err)
 	}
 
-	// Create the TLS configuration function for the server endpoints.
-	tlsConfig, unsupportedCiphers := utiltls.NewTLSConfigFromProfile(tlsSecurityProfileSpec)
-	if len(unsupportedCiphers) > 0 {
-		klog.Infof("TLS configuration contains unsupported ciphers that will be ignored: %v", unsupportedCiphers)
+	// Create a default TLS configuration function.
+	tlsConfig := func(*tls.Config) {}
+
+	if libgocrypto.ShouldHonorClusterTLSProfile(tlsAdherencePolicy) {
+		var unsupportedCiphers []string
+		// The TLS adherence policy indicates that the components should honor the cluster-wide TLS profile.
+		// Set the TLS configuration function to use the cluster-wide TLS profile.
+		tlsConfig, unsupportedCiphers = utiltls.NewTLSConfigFromProfile(tlsSecurityProfileSpec)
+		if len(unsupportedCiphers) > 0 {
+			klog.Infof("TLS configuration contains unsupported ciphers that will be ignored: %v", unsupportedCiphers)
+		}
 	}
 
 	// Create a context that can be cancelled when there is a need to shut down the manager	.
@@ -269,8 +284,16 @@ func main() {
 	// Set up the TLS security profile watcher controller.
 	// This will trigger a graceful shutdown when the TLS profile changes.
 	if err := (&utiltls.SecurityProfileWatcher{
-		Client:                mgr.GetClient(),
-		InitialTLSProfileSpec: tlsSecurityProfileSpec,
+		Client:                    mgr.GetClient(),
+		InitialTLSAdherencePolicy: tlsAdherencePolicy,
+		InitialTLSProfileSpec:     tlsSecurityProfileSpec,
+		OnAdherencePolicyChange: func(ctx context.Context, oldTLSAdherencePolicy, newTLSAdherencePolicy configv1.TLSAdherencePolicy) {
+			klog.Infof("TLS adherence policy has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
+				"old adherence policy", oldTLSAdherencePolicy,
+				"new adherence policy", newTLSAdherencePolicy,
+			)
+			cancel()
+		},
 		OnProfileChange: func(ctx context.Context, oldTLSProfileSpec, newTLSProfileSpec configv1.TLSProfileSpec) {
 			klog.Infof("TLS profile has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
 				"old profile", oldTLSProfileSpec,
