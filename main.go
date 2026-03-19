@@ -30,15 +30,14 @@ import (
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
 	utiltls "github.com/openshift/controller-runtime-common/pkg/tls"
-	libgocrypto "github.com/openshift/library-go/pkg/crypto"
 	flag "github.com/spf13/pflag"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	control "sigs.k8s.io/controller-runtime"
@@ -71,16 +70,13 @@ func main() {
 	var leaderElectResourceName string
 	var leaderElectResourceNamespace string
 	var metricsBindAddress string
+	var tlsMinVersionFlag string
+	var tlsCipherSuitesFlag []string
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
 	// Set logger for controller-runtime
 	control.SetLogger(klog.NewKlogr())
-
-	scheme := runtime.NewScheme()
-	if err := configv1.AddToScheme(scheme); err != nil {
-		klog.Fatalf("unable to add configv1 to scheme: %v", err)
-	}
 
 	klog.InitFlags(nil)
 	flagSet.AddGoFlagSet(goflag.CommandLine)
@@ -100,6 +96,8 @@ func main() {
 	flagSet.StringVar(&leaderElectResourceName, "leader-elect-resource-name", "cluster-machine-approver-leader", "the name of the resource that leader election will use for holding the leader lock.")
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
 	flagSet.StringVar(&metricsBindAddress, "metrics-bind-address", metrics.DefaultMetricsBindAddress, "the address the metrics endpoint binds to.")
+	flagSet.StringVar(&tlsMinVersionFlag, "tls-min-version", "", "Minimum TLS version supported. When set with --tls-cipher-suites, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSPossibleVersions(), ", "))
+	flagSet.StringSliceVar(&tlsCipherSuitesFlag, "tls-cipher-suites", nil, "Comma-separated list of cipher suites for the server. When set with --tls-min-version, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSCipherPossibleValues(), ", "))
 
 	// Deprecated options
 	flagSet.StringVar(&apiGroup, "apigroup", "", "API group for machines")
@@ -109,6 +107,11 @@ func main() {
 
 	if apiGroup != "" && len(apiGroupVersions) > 0 {
 		klog.Fatal("Cannot set both --apigroup and --api-group-version options together.")
+	}
+
+	tlsOverrideFromFlags := tlsMinVersionFlag != "" || len(tlsCipherSuitesFlag) > 0
+	if tlsOverrideFromFlags && (tlsMinVersionFlag == "" || len(tlsCipherSuitesFlag) == 0) {
+		klog.Fatal("Both --tls-min-version and --tls-cipher-suites must be provided when either is set.")
 	}
 
 	var parsedAPIGroupVersions []schema.GroupVersion
@@ -151,35 +154,10 @@ func main() {
 		klog.Fatalf("Can't set client configs: %v", err)
 	}
 
-	k8sClient, err := client.New(workloadConfig, client.Options{Scheme: scheme})
+	// Resolve the TLS configuration for the server endpoints.
+	tlsResult, err := resolveTLSConfig(context.Background(), workloadConfig, tlsMinVersionFlag, tlsCipherSuitesFlag)
 	if err != nil {
-		klog.Fatalf("unable to create Kubernetes client: %v", err)
-	}
-
-	// Fetch the TLS adherence policy from the APIServer resource.
-	// This will be used to determine if the components should honor the cluster-wide TLS profile.
-	tlsAdherencePolicy, err := utiltls.FetchAPIServerTLSAdherencePolicy(context.Background(), k8sClient)
-	if err != nil {
-		klog.Fatalf("unable to get TLS adherence policy from API server: %v", err)
-	}
-
-	// Fetch the TLS profile from the APIServer resource.
-	tlsSecurityProfileSpec, err := utiltls.FetchAPIServerTLSProfile(context.Background(), k8sClient)
-	if err != nil {
-		klog.Fatalf("unable to get TLS profile from API server: %v", err)
-	}
-
-	// Create a default TLS configuration function.
-	tlsConfig := func(*tls.Config) {}
-
-	if libgocrypto.ShouldHonorClusterTLSProfile(tlsAdherencePolicy) {
-		var unsupportedCiphers []string
-		// The TLS adherence policy indicates that the components should honor the cluster-wide TLS profile.
-		// Set the TLS configuration function to use the cluster-wide TLS profile.
-		tlsConfig, unsupportedCiphers = utiltls.NewTLSConfigFromProfile(tlsSecurityProfileSpec)
-		if len(unsupportedCiphers) > 0 {
-			klog.Infof("TLS configuration contains unsupported ciphers that will be ignored: %v", unsupportedCiphers)
-		}
+		klog.Fatalf("unable to configure TLS: %v", err)
 	}
 
 	// Create a context that can be cancelled when there is a need to shut down the manager	.
@@ -194,7 +172,7 @@ func main() {
 			BindAddress:    metricsBindAddress,
 			SecureServing:  true,
 			FilterProvider: filters.WithAuthenticationAndAuthorization,
-			TLSOpts:        []func(*tls.Config){tlsConfig},
+			TLSOpts:        []func(*tls.Config){tlsResult.TLSConfig},
 		},
 		LeaderElectionNamespace:       leaderElectResourceNamespace,
 		LeaderElection:                leaderElect,
@@ -283,26 +261,32 @@ func main() {
 
 	// Set up the TLS security profile watcher controller.
 	// This will trigger a graceful shutdown when the TLS profile changes.
-	if err := (&utiltls.SecurityProfileWatcher{
-		Client:                    mgr.GetClient(),
-		InitialTLSAdherencePolicy: tlsAdherencePolicy,
-		InitialTLSProfileSpec:     tlsSecurityProfileSpec,
-		OnAdherencePolicyChange: func(ctx context.Context, oldTLSAdherencePolicy, newTLSAdherencePolicy configv1.TLSAdherencePolicy) {
-			klog.Infof("TLS adherence policy has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
-				"old adherence policy", oldTLSAdherencePolicy,
-				"new adherence policy", newTLSAdherencePolicy,
-			)
-			cancel()
-		},
-		OnProfileChange: func(ctx context.Context, oldTLSProfileSpec, newTLSProfileSpec configv1.TLSProfileSpec) {
-			klog.Infof("TLS profile has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
-				"old profile", oldTLSProfileSpec,
-				"new profile", newTLSProfileSpec,
-			)
-			cancel()
-		},
-	}).SetupWithManager(mgr); err != nil {
-		klog.Fatalf("unable to create TLS security profile watcher controller: %v", err)
+	// When TLS is overridden via CLI flags, the watcher is not needed since
+	// the component is not reading from apiservers.config.openshift.io/cluster.
+	if tlsOverrideFromFlags {
+		klog.Info("TLS security profile watcher disabled because TLS is configured via CLI flags")
+	} else {
+		if err := (&utiltls.SecurityProfileWatcher{
+			Client:                    mgr.GetClient(),
+			InitialTLSAdherencePolicy: tlsResult.TLSAdherencePolicy,
+			InitialTLSProfileSpec:     tlsResult.TLSProfileSpec,
+			OnAdherencePolicyChange: func(ctx context.Context, oldTLSAdherencePolicy, newTLSAdherencePolicy configv1.TLSAdherencePolicy) {
+				klog.Infof("TLS adherence policy has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
+					"old adherence policy", oldTLSAdherencePolicy,
+					"new adherence policy", newTLSAdherencePolicy,
+				)
+				cancel()
+			},
+			OnProfileChange: func(ctx context.Context, oldTLSProfileSpec, newTLSProfileSpec configv1.TLSProfileSpec) {
+				klog.Infof("TLS profile has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
+					"old profile", oldTLSProfileSpec,
+					"new profile", newTLSProfileSpec,
+				)
+				cancel()
+			},
+		}).SetupWithManager(mgr); err != nil {
+			klog.Fatalf("unable to create TLS security profile watcher controller: %v", err)
+		}
 	}
 
 	// Start the Cmd
