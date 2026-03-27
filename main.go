@@ -29,6 +29,7 @@ import (
 	networkv1 "github.com/openshift/api/network/v1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
+	pkgtls "github.com/openshift/cluster-machine-approver/pkg/tls"
 	utiltls "github.com/openshift/controller-runtime-common/pkg/tls"
 	flag "github.com/spf13/pflag"
 	certificatesv1 "k8s.io/api/certificates/v1"
@@ -96,8 +97,8 @@ func main() {
 	flagSet.StringVar(&leaderElectResourceName, "leader-elect-resource-name", "cluster-machine-approver-leader", "the name of the resource that leader election will use for holding the leader lock.")
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
 	flagSet.StringVar(&metricsBindAddress, "metrics-bind-address", metrics.DefaultMetricsBindAddress, "the address the metrics endpoint binds to.")
-	flagSet.StringVar(&tlsMinVersionFlag, "tls-min-version", "", "Minimum TLS version supported. When set with --tls-cipher-suites, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSPossibleVersions(), ", "))
-	flagSet.StringSliceVar(&tlsCipherSuitesFlag, "tls-cipher-suites", nil, "Comma-separated list of cipher suites for the server. When set with --tls-min-version, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSCipherPossibleValues(), ", "))
+	flagSet.StringVar(&tlsMinVersionFlag, "tls-min-version", "", "Minimum TLS version supported. When set, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSPossibleVersions(), ", "))
+	flagSet.StringSliceVar(&tlsCipherSuitesFlag, "tls-cipher-suites", nil, "Comma-separated list of cipher suites for the server. When set, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSCipherPossibleValues(), ", "))
 
 	// Deprecated options
 	flagSet.StringVar(&apiGroup, "apigroup", "", "API group for machines")
@@ -110,9 +111,6 @@ func main() {
 	}
 
 	tlsOverrideFromFlags := tlsMinVersionFlag != "" || len(tlsCipherSuitesFlag) > 0
-	if tlsOverrideFromFlags && (tlsMinVersionFlag == "" || len(tlsCipherSuitesFlag) == 0) {
-		klog.Fatal("Both --tls-min-version and --tls-cipher-suites must be provided when either is set.")
-	}
 
 	var parsedAPIGroupVersions []schema.GroupVersion
 
@@ -155,7 +153,7 @@ func main() {
 	}
 
 	// Resolve the TLS configuration for the server endpoints.
-	tlsResult, err := resolveTLSConfig(context.Background(), workloadConfig, tlsMinVersionFlag, tlsCipherSuitesFlag)
+	tlsResult, err := pkgtls.ResolveTLSConfig(context.Background(), workloadConfig, tlsMinVersionFlag, tlsCipherSuitesFlag)
 	if err != nil {
 		klog.Fatalf("unable to configure TLS: %v", err)
 	}
