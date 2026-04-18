@@ -108,7 +108,7 @@ Details of this workflow can be found in the same file as the client workflow,
 [csr_check.go](https://github.com/openshift/cluster-machine-approver/blob/master/pkg/controller/csr_check.go).
 
 For this workflow, it is assumed that the `Node` is now up and running, and the
-`Node` object exists in the API.  Validation for the server CSR is different
+`Node` object exists in the API. Validation for the server CSR is different
 than the client case and is based primarily on matching addresses between
 associated `Node` and `Machine` objects.
 
