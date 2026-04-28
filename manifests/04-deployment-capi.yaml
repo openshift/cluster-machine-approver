@@ -26,7 +26,6 @@ spec:
       labels:
         app: machine-approver-capi
     spec:
-      hostNetwork: true
       serviceAccountName: machine-approver-sa
       containers:
       - name: machine-approver-controller
