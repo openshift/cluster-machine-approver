@@ -286,7 +286,7 @@ github.com/openshift/client-go/config/informers/externalversions/internalinterfa
 github.com/openshift/client-go/config/listers/config/v1
 github.com/openshift/client-go/operator/applyconfigurations/internal
 github.com/openshift/client-go/operator/applyconfigurations/operator/v1
-# github.com/openshift/controller-runtime-common v0.0.0-20260318085703-1812aed6dbd2
+# github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
 ## explicit; go 1.25.0
 github.com/openshift/controller-runtime-common/pkg/tls
 # github.com/openshift/library-go v0.0.0-20260318142011-72bf34f474bc
