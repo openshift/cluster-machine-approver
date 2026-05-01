@@ -22,6 +22,7 @@ spec:
       annotations:
         target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
         kubectl.kubernetes.io/default-container: machine-approver-controller
+        openshift.io/required-scc: restricted-v2
       labels:
         app: machine-approver
     spec:
