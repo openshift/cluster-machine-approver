@@ -206,6 +206,14 @@ rules:
   - hostsubnets
   verbs:
   - get
+- apiGroups:
+  - k8s.ovn.org
+  resources:
+  - egressips
+  verbs:
+  - get
+  - list
+  - watch
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
