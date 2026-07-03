@@ -29,6 +29,7 @@ import (
 	networkv1 "github.com/openshift/api/network/v1"
 	"github.com/openshift/cluster-machine-approver/pkg/controller"
 	"github.com/openshift/cluster-machine-approver/pkg/metrics"
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	flag "github.com/spf13/pflag"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -186,6 +187,9 @@ func main() {
 		klog.Fatal(err)
 	}
 	if err := networkv1.Install(mgr.GetScheme()); err != nil {
+		klog.Fatal(err)
+	}
+	if err := egressipv1.AddToScheme(mgr.GetScheme()); err != nil {
 		klog.Fatal(err)
 	}
 
