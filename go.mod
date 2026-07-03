@@ -10,6 +10,7 @@ require (
 	github.com/openshift/client-go v0.0.0-20260723174158-ae2315de9d73
 	github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
 	github.com/openshift/library-go v0.0.0-20260727154952-0aacacf2673e
+	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v0.0.0-20260811083613-bf0b30b853a7
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/pflag v1.0.10
 	k8s.io/api v0.36.2
