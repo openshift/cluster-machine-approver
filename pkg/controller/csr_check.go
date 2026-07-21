@@ -16,6 +16,7 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	networkv1 "github.com/openshift/api/network/v1"
 	machinehandlerpkg "github.com/openshift/cluster-machine-approver/pkg/machinehandler"
+	"github.com/prometheus/client_golang/prometheus"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -45,9 +46,6 @@ const (
 	networkClusterName      = "cluster"
 )
 
-var clientKubeletFieldSelector = fmt.Sprintf("%s=%s", signerNameField, certificatesv1.KubeAPIServerClientKubeletSignerName)
-var kubeletServingFieldSelector = fmt.Sprintf("%s=%s", signerNameField, certificatesv1.KubeletServingSignerName)
-
 var nodeBootstrapperGroups = sets.NewString(
 	"system:serviceaccounts:openshift-machine-config-operator",
 	"system:serviceaccounts",
@@ -61,8 +59,92 @@ var nodeServingGroups = sets.NewString(
 
 var now = time.Now
 
-var MaxPendingCSRs uint32
-var PendingCSRs uint32
+// Metrics updated by the controller and scraped via pkg/metrics.
+var (
+	MaxPendingCSRs uint32
+	PendingCSRs    uint32
+
+	DuplicateCSRDeniedTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "mapi_duplicate_csr_denied_total",
+		Help: "Total number of pending node CSRs denied because they were superseded by a newer CSR for the same node and signer",
+	})
+)
+
+func nodeCSRCommonName(parsed *x509.CertificateRequest) (string, bool) {
+	if parsed == nil {
+		return "", false
+	}
+	cn := parsed.Subject.CommonName
+	if !strings.HasPrefix(cn, nodeUserPrefix) {
+		return "", false
+	}
+	if len(strings.TrimPrefix(cn, nodeUserPrefix)) == 0 {
+		return "", false
+	}
+	return cn, true
+}
+
+// nodeCSRSupersedeCN returns the system:node CN used for supersede grouping.
+// Serving CSRs must also have Spec.Username equal to the parsed CN (same bar as approval).
+func nodeCSRSupersedeCN(csr *certificatesv1.CertificateSigningRequest, parsed *x509.CertificateRequest) (string, bool) {
+	cn, ok := nodeCSRCommonName(parsed)
+	if !ok {
+		return "", false
+	}
+	if csr.Spec.SignerName == certificatesv1.KubeletServingSignerName && parsed.Subject.CommonName != csr.Spec.Username {
+		return "", false
+	}
+	return cn, true
+}
+
+type csrSeenKey struct {
+	cn     string
+	signer string
+}
+
+// supersededPendingNodeCSRs returns indices into csrs of older unsigned node CSRs
+// superseded by a newer unsigned CSR for the same (parsed system:node CN, signerName).
+// Candidates use isUnsignedPendingNodeCSR and are not limited to the 1h metrics window.
+func supersededPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) []int {
+	pendingIdx := make([]int, 0, len(csrs))
+	for i := range csrs {
+		if isUnsignedPendingNodeCSR(&csrs[i]) {
+			pendingIdx = append(pendingIdx, i)
+		}
+	}
+
+	// Newest first so the first (CN, signer) we see is kept; later ones are superseded.
+	sort.SliceStable(pendingIdx, func(i, j int) bool {
+		a, b := csrs[pendingIdx[i]], csrs[pendingIdx[j]]
+		ti, tj := a.CreationTimestamp.Time, b.CreationTimestamp.Time
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return a.Name > b.Name
+	})
+
+	seen := make(map[csrSeenKey]struct{}, len(pendingIdx))
+	superseded := make([]int, 0)
+	// Walk newest→oldest: first valid CN+signer is kept; further matches are superseded.
+	for _, idx := range pendingIdx {
+		csr := &csrs[idx]
+		parsed, err := parseCSR(csr)
+		if err != nil {
+			continue
+		}
+		cn, ok := nodeCSRSupersedeCN(csr, parsed)
+		if !ok {
+			continue
+		}
+		key := csrSeenKey{cn: cn, signer: csr.Spec.SignerName}
+		if _, exists := seen[key]; !exists {
+			seen[key] = struct{}{}
+			continue
+		}
+		superseded = append(superseded, idx)
+	}
+	return superseded
+}
 
 func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
@@ -476,13 +558,25 @@ func inTimeSpan(start, end, check time.Time) bool {
 	return check.After(start) && check.Before(end)
 }
 
-func isApproved(csr certificatesv1.CertificateSigningRequest) bool {
+func hasCondition(csr certificatesv1.CertificateSigningRequest, condType certificatesv1.RequestConditionType) bool {
 	for _, condition := range csr.Status.Conditions {
-		if condition.Type == certificatesv1.CertificateApproved {
+		if condition.Type == condType {
 			return true
 		}
 	}
 	return false
+}
+
+func isApproved(csr certificatesv1.CertificateSigningRequest) bool {
+	return hasCondition(csr, certificatesv1.CertificateApproved)
+}
+
+func isDenied(csr certificatesv1.CertificateSigningRequest) bool {
+	return hasCondition(csr, certificatesv1.CertificateDenied)
+}
+
+func isFailed(csr certificatesv1.CertificateSigningRequest) bool {
+	return hasCondition(csr, certificatesv1.CertificateFailed)
 }
 
 func isRecentlyApproved(csr certificatesv1.CertificateSigningRequest) bool {
@@ -522,7 +616,7 @@ func recentlyPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) in
 			continue
 		}
 
-		if pendingNodeCertFilter(&csr) {
+		if isUnsignedPendingNodeCSR(&csr) {
 			pending++
 		}
 	}
