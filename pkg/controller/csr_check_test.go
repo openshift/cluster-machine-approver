@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -21,12 +22,14 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	networkv1 "github.com/openshift/api/network/v1"
+	dto "github.com/prometheus/client_model/go"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	certificatesv1client "k8s.io/client-go/kubernetes/typed/certificates/v1"
 	testingclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -2056,6 +2059,54 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 			Request:    []byte(multusCSRPEM),
 		},
 	}
+	deniedNodeBootstrapperCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			SignerName: certificatesv1.KubeAPIServerClientKubeletSignerName,
+			Username:   nodeBootstrapperUsername,
+			Groups:     nodeBootstrapperGroups.List(),
+		},
+		Status: certificatesv1.CertificateSigningRequestStatus{
+			Conditions: []certificatesv1.CertificateSigningRequestCondition{{
+				Type: certificatesv1.CertificateDenied,
+			}},
+		},
+	}
+	failedNodeBootstrapperCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			SignerName: certificatesv1.KubeAPIServerClientKubeletSignerName,
+			Username:   nodeBootstrapperUsername,
+			Groups:     nodeBootstrapperGroups.List(),
+		},
+		Status: certificatesv1.CertificateSigningRequestStatus{
+			Conditions: []certificatesv1.CertificateSigningRequestCondition{{
+				Type: certificatesv1.CertificateFailed,
+			}},
+		},
+	}
+	deniedNodeServerCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username:   nodeUserPrefix + "clustername-abcde-master-us-west-1a-0",
+			SignerName: certificatesv1.KubeletServingSignerName,
+			Groups:     nodeServingGroups.List(),
+		},
+		Status: certificatesv1.CertificateSigningRequestStatus{
+			Conditions: []certificatesv1.CertificateSigningRequestCondition{{
+				Type: certificatesv1.CertificateDenied,
+			}},
+		},
+	}
+	failedNodeServerCSR := certificatesv1.CertificateSigningRequest{
+		Spec: certificatesv1.CertificateSigningRequestSpec{
+			Username:   nodeUserPrefix + "clustername-abcde-master-us-west-1a-0",
+			SignerName: certificatesv1.KubeletServingSignerName,
+			Groups:     nodeServingGroups.List(),
+		},
+		Status: certificatesv1.CertificateSigningRequestStatus{
+			Conditions: []certificatesv1.CertificateSigningRequestCondition{{
+				Type: certificatesv1.CertificateFailed,
+			}},
+		},
+	}
 
 	pendingTime := baseTime.Add(time.Second)
 	pastApprovalTime := baseTime.Add(-maxPendingDelta)
@@ -2089,6 +2140,16 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 		{
 			name:          "recently approved csr",
 			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, approvedNodeBootstrapperCSR)},
+			expectPending: 0,
+		},
+		{
+			name:          "recently denied node bootstrapper csr",
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, deniedNodeBootstrapperCSR)},
+			expectPending: 0,
+		},
+		{
+			name:          "recently failed node bootstrapper csr",
+			csrs:          []certificatesv1.CertificateSigningRequest{createdAt(pendingTime, failedNodeBootstrapperCSR)},
 			expectPending: 0,
 		},
 		{
@@ -2129,6 +2190,18 @@ func TestRecentlyPendingNodeBootstrapperCSRs(t *testing.T) {
 				createdAt(pastApprovalTime, pendingNodeBootstrapperCSR),
 			},
 			expectPending: 3,
+		},
+		{
+			name: "pending mixed with denied and failed",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				createdAt(pendingTime, pendingNodeBootstrapperCSR),
+				createdAt(pendingTime, pendingNodeServerCSR),
+				createdAt(pendingTime, deniedNodeBootstrapperCSR),
+				createdAt(pendingTime, failedNodeBootstrapperCSR),
+				createdAt(pendingTime, deniedNodeServerCSR),
+				createdAt(pendingTime, failedNodeServerCSR),
+			},
+			expectPending: 2,
 		},
 	}
 
@@ -2603,4 +2676,268 @@ func respond(server net.Listener) {
 		defer conn.Close()
 		conn.Write([]byte(server.Addr().String()))
 	}
+}
+
+func TestSupersededPendingNodeCSRs(t *testing.T) {
+	clientPEM := createCSR("system:node:worker-1", defaultOrgs, nil, nil)
+	clientPEMOther := createCSR("system:node:worker-2", defaultOrgs, nil, nil)
+	servingPEM := createCSR("system:node:worker-1", defaultOrgs, defaultIPs, defaultDNSNames)
+	badCNPEM := createCSR("not-a-node", defaultOrgs, nil, nil)
+	emptyNodePEM := createCSR("system:node:", defaultOrgs, nil, nil)
+
+	pendingClient := func(name string, cnPEM string, created time.Time) certificatesv1.CertificateSigningRequest {
+		return certificatesv1.CertificateSigningRequest{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              name,
+				CreationTimestamp: metav1.NewTime(created),
+			},
+			Spec: certificatesv1.CertificateSigningRequestSpec{
+				Request:    []byte(cnPEM),
+				SignerName: certificatesv1.KubeAPIServerClientKubeletSignerName,
+				Username:   nodeBootstrapperUsername,
+				Groups:     nodeBootstrapperGroups.List(),
+			},
+		}
+	}
+	pendingServing := func(name string, created time.Time) certificatesv1.CertificateSigningRequest {
+		return certificatesv1.CertificateSigningRequest{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              name,
+				CreationTimestamp: metav1.NewTime(created),
+			},
+			Spec: certificatesv1.CertificateSigningRequestSpec{
+				Request:    []byte(servingPEM),
+				SignerName: certificatesv1.KubeletServingSignerName,
+				Username:   nodeUserPrefix + "worker-1",
+				Groups:     nodeServingGroups.List(),
+			},
+		}
+	}
+	pendingServingAs := func(name, username string, pem string, created time.Time) certificatesv1.CertificateSigningRequest {
+		return certificatesv1.CertificateSigningRequest{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              name,
+				CreationTimestamp: metav1.NewTime(created),
+			},
+			Spec: certificatesv1.CertificateSigningRequestSpec{
+				Request:    []byte(pem),
+				SignerName: certificatesv1.KubeletServingSignerName,
+				Username:   username,
+				Groups:     nodeServingGroups.List(),
+			},
+		}
+	}
+
+	old := baseTime.Add(-2 * time.Hour)
+	mid := baseTime.Add(-time.Hour)
+	newest := baseTime.Add(-time.Minute)
+	// Older than the 1h pending metric window — prune must still consider any age.
+	veryOld := baseTime.Add(-3 * time.Hour)
+
+	tests := []struct {
+		name       string
+		csrs       []certificatesv1.CertificateSigningRequest
+		wantDenied []string
+	}{
+		{
+			name: "client signer keeps newest denies older for same CN",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("client-old", clientPEM, old),
+				pendingClient("client-mid", clientPEM, mid),
+				pendingClient("client-new", clientPEM, newest),
+			},
+			wantDenied: []string{"client-mid", "client-old"},
+		},
+		{
+			name: "serving signer keeps newest denies older for same CN",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingServing("serving-old", old),
+				pendingServing("serving-new", newest),
+			},
+			wantDenied: []string{"serving-old"},
+		},
+		{
+			name: "client and serving for same CN are independent groups",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("client-old", clientPEM, old),
+				pendingClient("client-new", clientPEM, newest),
+				pendingServing("serving-old", old),
+				pendingServing("serving-new", newest),
+			},
+			wantDenied: []string{"client-old", "serving-old"},
+		},
+		{
+			name: "multi CSR per CN fixture across nodes",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("w1-a", clientPEM, old),
+				pendingClient("w1-b", clientPEM, mid),
+				pendingClient("w1-c", clientPEM, newest),
+				pendingClient("w2-a", clientPEMOther, old),
+				pendingClient("w2-b", clientPEMOther, newest),
+			},
+			wantDenied: []string{"w1-a", "w1-b", "w2-a"},
+		},
+		{
+			name: "bootstrapper-issued client CSRs group by parsed CN not username",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("boot-old", clientPEM, old),
+				pendingClient("boot-new", clientPEM, newest),
+			},
+			wantDenied: []string{"boot-old"},
+		},
+		{
+			name: "prunes CSRs older than pending metric window",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("ancient", clientPEM, veryOld),
+				pendingClient("fresh", clientPEM, newest),
+			},
+			wantDenied: []string{"ancient"},
+		},
+		{
+			name: "skips deny when CN is not system:node",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("bad-cn-old", badCNPEM, old),
+				pendingClient("bad-cn-new", badCNPEM, newest),
+			},
+			wantDenied: nil,
+		},
+		{
+			name: "skips deny when CN is system:node: with empty node name",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("empty-old", emptyNodePEM, old),
+				pendingClient("empty-new", emptyNodePEM, newest),
+			},
+			wantDenied: nil,
+		},
+		{
+			name: "name descending tie-break when creationTimestamp equal",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingClient("csr-aaa", clientPEM, newest),
+				pendingClient("csr-zzz", clientPEM, newest),
+			},
+			wantDenied: []string{"csr-aaa"},
+		},
+		{
+			name: "already denied CSRs are not prune candidates",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				func() certificatesv1.CertificateSigningRequest {
+					csr := pendingClient("already-denied", clientPEM, old)
+					csr.Status.Conditions = []certificatesv1.CertificateSigningRequestCondition{{
+						Type: certificatesv1.CertificateDenied,
+					}}
+					return csr
+				}(),
+				pendingClient("kept", clientPEM, newest),
+			},
+			wantDenied: nil,
+		},
+		{
+			name: "already approved CSRs are not prune candidates",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				func() certificatesv1.CertificateSigningRequest {
+					csr := pendingClient("already-approved", clientPEM, old)
+					csr.Status.Conditions = []certificatesv1.CertificateSigningRequestCondition{{
+						Type:               certificatesv1.CertificateApproved,
+						LastUpdateTime:     metav1.NewTime(baseTime),
+						LastTransitionTime: metav1.NewTime(baseTime),
+						Message:            "approved by someone else",
+						Status:             corev1.ConditionTrue,
+					}}
+					return csr
+				}(),
+				pendingClient("kept", clientPEM, newest),
+			},
+			wantDenied: nil,
+		},
+		{
+			name: "serving CSR with CN != Username is ignored for supersede",
+			csrs: []certificatesv1.CertificateSigningRequest{
+				pendingServing("serving-legit-old", old),
+				// Newest by timestamp, but PEM CN is worker-1 while Username is worker-2.
+				pendingServingAs("serving-spoof-new", nodeUserPrefix+"worker-2", servingPEM, newest),
+			},
+			// Spoof must not keep the (worker-1, serving) group or cause deny of the legit CSR.
+			wantDenied: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotIdx := supersededPendingNodeCSRs(tt.csrs)
+			gotNames := make([]string, 0, len(gotIdx))
+			for _, idx := range gotIdx {
+				gotNames = append(gotNames, tt.csrs[idx].Name)
+			}
+			if !sets.NewString(gotNames...).Equal(sets.NewString(tt.wantDenied...)) {
+				t.Errorf("supersededPendingNodeCSRs() = %v, want %v", gotNames, tt.wantDenied)
+			}
+		})
+	}
+}
+
+func TestDenyIncrementsDuplicateCSRDeniedTotal(t *testing.T) {
+	csr := &certificatesv1.CertificateSigningRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "csr-deny-metric"},
+	}
+
+	t.Run("increments after successful UpdateApproval", func(t *testing.T) {
+		before := duplicateCSRDeniedTotalValue(t)
+		client := &denyCSRClient{}
+		if err := deny(context.Background(), client, csr.DeepCopy()); err != nil {
+			t.Fatalf("deny() error = %v", err)
+		}
+		after := duplicateCSRDeniedTotalValue(t)
+		if after-before != 1 {
+			t.Fatalf("mapi_duplicate_csr_denied_total delta = %v, want 1", after-before)
+		}
+		if client.updated == nil {
+			t.Fatal("expected UpdateApproval to be called")
+		}
+		if !isDenied(*client.updated) {
+			t.Fatal("expected denied condition on updated CSR")
+		}
+		cond := client.updated.Status.Conditions[len(client.updated.Status.Conditions)-1]
+		if cond.Reason != csrConditionDenyReason {
+			t.Errorf("deny reason = %q, want %q", cond.Reason, csrConditionDenyReason)
+		}
+		if cond.Message != csrConditionDenyMessage {
+			t.Errorf("deny message = %q, want %q", cond.Message, csrConditionDenyMessage)
+		}
+	})
+
+	t.Run("does not increment when UpdateApproval fails", func(t *testing.T) {
+		before := duplicateCSRDeniedTotalValue(t)
+		client := &denyCSRClient{err: fmt.Errorf("update failed")}
+		if err := deny(context.Background(), client, csr.DeepCopy()); err == nil {
+			t.Fatal("deny() error = nil, want update failure")
+		}
+		after := duplicateCSRDeniedTotalValue(t)
+		if after != before {
+			t.Fatalf("mapi_duplicate_csr_denied_total delta = %v, want 0", after-before)
+		}
+	})
+}
+
+// denyCSRClient is a minimal CertificateSigningRequestInterface stub for deny().
+type denyCSRClient struct {
+	certificatesv1client.CertificateSigningRequestInterface
+	err     error
+	updated *certificatesv1.CertificateSigningRequest
+}
+
+func (c *denyCSRClient) UpdateApproval(_ context.Context, _ string, csr *certificatesv1.CertificateSigningRequest, _ metav1.UpdateOptions) (*certificatesv1.CertificateSigningRequest, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.updated = csr.DeepCopy()
+	return csr, nil
+}
+
+func duplicateCSRDeniedTotalValue(t *testing.T) float64 {
+	t.Helper()
+	var metric dto.Metric
+	if err := DuplicateCSRDeniedTotal.Write(&metric); err != nil {
+		t.Fatalf("Write metric: %v", err)
+	}
+	return metric.GetCounter().GetValue()
 }

@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	certificatesv1client "k8s.io/client-go/kubernetes/typed/certificates/v1"
 	"k8s.io/client-go/rest"
@@ -32,6 +33,8 @@ const (
 	configNamespace            = "openshift-config-managed"
 	kubeletCAConfigMap         = "csr-controller-ca"
 	csrConditionApproveMessage = "This CSR was approved by the Node CSR Approver (cluster-machine-approver)"
+	csrConditionDenyReason     = "NodeCSRSuperseded"
+	csrConditionDenyMessage    = "This CSR was denied by the Node CSR Approver (cluster-machine-approver) because it was superseded by a newer CSR for the same node and signer"
 )
 
 // MachineApproverReconciler reconciles a machine-approver  object
@@ -71,37 +74,55 @@ func (m *CertificateApprover) buildWithManager(mgr ctrl.Manager, options control
 			})).Complete(c)
 }
 
-// pendingNodeCertFilter filters CSRs that need to be reconciled
-func pendingNodeCertFilter(obj runtime.Object) bool {
-	cert, ok := obj.(*certificatesv1.CertificateSigningRequest)
-	// Reconcile unapproved or approved by another controller to update our metrics
-	reconcileRequired := ok && (!isApproved(*cert) || (isRecentlyApproved(*cert) && !isApprovedByCMA(*cert)))
-
-	if !reconcileRequired {
-		return false
-	}
-
+// isNodeCSRKind reports whether csr is a node client or serving CSR we care about
+// (signer/group/username), ignoring approval status.
+func isNodeCSRKind(cert *certificatesv1.CertificateSigningRequest) bool {
 	switch cert.Spec.SignerName {
 	case certificatesv1.KubeletServingSignerName:
 		groupSet := sets.NewString(cert.Spec.Groups...)
-		// Reconcile kubernetes.io/kubelet-serving when it has the system:nodes group
 		if !groupSet.Has(nodeGroup) {
 			klog.V(3).Infof("%s: Ignoring csr because it does not have the system:nodes group", cert.Name)
 			return false
 		}
 	case certificatesv1.KubeAPIServerClientKubeletSignerName:
-		// Reconcile kubernetes.io/kube-apiserver-client-kubelet when it is created by the node bootstrapper
 		if cert.Spec.Username != nodeBootstrapperUsername {
 			klog.V(3).Infof("%s: Ignoring csr because it is not from the node bootstrapper", cert.Name)
 			return false
 		}
 	default:
-		// Ignore all other CSRs
 		klog.V(3).Infof("%s: Ignoring csr because of unsupported signerName: %s", cert.Name, cert.Spec.SignerName)
 		return false
 	}
-
 	return true
+}
+
+// isUnsignedPendingNodeCSR is true for node CSRs that are not Approved, Denied, or Failed.
+// Used for supersede selection and pending metrics (not for reconcile wake).
+func isUnsignedPendingNodeCSR(cert *certificatesv1.CertificateSigningRequest) bool {
+	if isApproved(*cert) || isDenied(*cert) || isFailed(*cert) {
+		return false
+	}
+	return isNodeCSRKind(cert)
+}
+
+// pendingNodeCertFilter wakes reconcile for unsigned node CSRs, or recently approved
+// ones not approved by CMA (metrics / catch-up). Not used for supersede candidates.
+func pendingNodeCertFilter(obj runtime.Object) bool {
+	cert, ok := obj.(*certificatesv1.CertificateSigningRequest)
+	if !ok {
+		return false
+	}
+
+	if isDenied(*cert) || isFailed(*cert) {
+		return false
+	}
+
+	reconcileRequired := !isApproved(*cert) || (isRecentlyApproved(*cert) && !isApprovedByCMA(*cert))
+	if !reconcileRequired {
+		return false
+	}
+
+	return isNodeCSRKind(cert)
 }
 
 func (m *CertificateApprover) toCSRs(ctx context.Context, obj client.Object) []reconcile.Request {
@@ -194,100 +215,103 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 		return reconcile.Result{}, fmt.Errorf("Failed to get Nodes: %w", err)
 	}
 
-	if offLimits := reconcileLimits(req.Name, machines, nodes, csrs); offLimits {
-		// Stop all reconciliation
-		return reconcile.Result{}, nil
+	denyErr := m.denySupersededDuplicates(ctx, csrs)
+	if denyErr != nil {
+		klog.Errorf("%v: failed to deny some superseded CSRs: %v", req.Name, denyErr)
 	}
 
-	for _, csr := range csrs {
-		if csr.Name == req.Name {
-			if err := m.reconcileCSR(csr, machines); err != nil {
-				return reconcile.Result{}, fmt.Errorf("could not reconcile CSR: %v", err)
-			}
-
-			// Reconcile the limits at the end of a reconcile so that the currently
-			// pending CSRs metric has an up to date value if we approved a CSR.
-			// When an error occurs, we requeue and so update the limits on the
-			// next reconcile.
-			// Don't use a cached client here else we may not have up to date CSRs.
-			return reconcile.Result{}, reconcileLimitsUncached(m.NodeRestCfg, csr.Name, machines, nodes)
+	var reconcileErr error
+	found := false
+	for i := range csrs {
+		if csrs[i].Name != req.Name {
+			continue
 		}
+		found = true
+		if err := m.reconcileCSR(ctx, &csrs[i], machines); err != nil {
+			reconcileErr = fmt.Errorf("could not reconcile CSR: %v", err)
+		}
+		break
+	}
+	if !found {
+		klog.Errorf("Failed to find CSR: %v", req.Name)
 	}
 
-	klog.Errorf("Failed to find CSR: %v", req)
-
-	return reconcile.Result{}, nil
+	// csrs reflects approve/deny from this pass, so gauges can use this list.
+	refreshPendingCSRMetrics(req.Name, machines, nodes, csrs)
+	return reconcile.Result{}, errors.NewAggregate([]error{denyErr, reconcileErr})
 }
 
-// reconcileLimits will short circut logic if number of pending CSRs is exceeding limit
-func reconcileLimits(csrName string, machines []machinehandlerpkg.Machine, nodes *corev1.NodeList, csrs []certificatesv1.CertificateSigningRequest) bool {
+// denySupersededDuplicates denies older unsigned duplicates in place on csrs.
+// Individual deny failures are aggregated; remaining candidates are still attempted.
+func (m *CertificateApprover) denySupersededDuplicates(ctx context.Context, csrs []certificatesv1.CertificateSigningRequest) error {
+	superseded := supersededPendingNodeCSRs(csrs)
+	if len(superseded) == 0 {
+		return nil
+	}
+
+	certClient, err := certificatesv1client.NewForConfig(m.NodeRestCfg)
+	if err != nil {
+		return err
+	}
+	csrClient := certClient.CertificateSigningRequests()
+
+	var denyErrs []error
+	for _, idx := range superseded {
+		csr := &csrs[idx]
+		if err := deny(ctx, csrClient, csr); err != nil {
+			denyErrs = append(denyErrs, fmt.Errorf("unable to deny superseded CSR %s: %w", csr.Name, err))
+			continue
+		}
+		klog.Infof("CSR %s denied as superseded by a newer CSR for the same node and signer", csr.Name)
+	}
+	return errors.NewAggregate(denyErrs)
+}
+
+// refreshPendingCSRMetrics updates PendingCSRs/MaxPendingCSRs gauges. It never blocks approval.
+func refreshPendingCSRMetrics(csrName string, machines []machinehandlerpkg.Machine, nodes *corev1.NodeList, csrs []certificatesv1.CertificateSigningRequest) {
 	maxPending := getMaxPending(machines, nodes)
 	atomic.StoreUint32(&MaxPendingCSRs, uint32(maxPending))
 	pending := recentlyPendingNodeCSRs(csrs)
 	atomic.StoreUint32(&PendingCSRs, uint32(pending))
 	if pending > maxPending {
-		klog.Errorf("%v: Pending CSRs: %d; Max pending allowed: %d. Difference between pending CSRs and machines > %v. Ignoring all CSRs as too many recent pending CSRs seen", csrName, pending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
-		return true
+		klog.Warningf("%v: pending node CSRs %d exceed alert threshold %d (machines/nodes + %v)", csrName, pending, maxPending, maxDiffBetweenPendingCSRsAndMachinesCount)
 	}
-
-	return false
 }
 
-// reconcileLimitsUncached is used to update the limits using an uncached certificates list.
-// This is used at the end of the approval process to ensure that the limits (and therefore)
-// the metrics are always up to date.
-func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machinehandlerpkg.Machine, nodes *corev1.NodeList) error {
-	certClient, err := certificatesv1client.NewForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("could not initialise certificates client: %v", err)
-	}
-
-	clientCertificates, err := certClient.CertificateSigningRequests().List(context.Background(), metav1.ListOptions{FieldSelector: clientKubeletFieldSelector})
-	if err != nil {
-		return fmt.Errorf("could not list CSRs: %v", err)
-	}
-
-	servingCertificates, err := certClient.CertificateSigningRequests().List(context.Background(), metav1.ListOptions{FieldSelector: kubeletServingFieldSelector})
-	if err != nil {
-		return fmt.Errorf("could not list CSRs: %v", err)
-	}
-
-	csrs := clientCertificates.Items
-	csrs = append(csrs, servingCertificates.Items...)
-	reconcileLimits(csrName, machines, nodes, csrs)
-	return nil
-}
-
-func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) error {
+func (m *CertificateApprover) reconcileCSR(ctx context.Context, csr *certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) error {
 	// If a CSR is approved after being added to the queue, but before we reconcile it,
 	// it may have already been approved. If it has already been approved, trying to
 	// approve it again will result in an error and cause a loop.
 	// Return early if the CSR has been approved externally.
-	if isApproved(csr) {
+	if isApproved(*csr) {
 		klog.Infof("%v: CSR is already approved", csr.Name)
 		return nil
 	}
+	if isDenied(*csr) || isFailed(*csr) {
+		klog.Infof("%v: CSR is already denied or failed", csr.Name)
+		return nil
+	}
 
-	parsedCSR, err := parseCSR(&csr)
+	parsedCSR, err := parseCSR(csr)
 	if err != nil {
 		klog.Errorf("%v: Failed to parse csr: %v", csr.Name, err)
 		return fmt.Errorf("error parsing request CSR: %v", err)
 	}
 
-	kubeletCA := m.getKubeletCA()
+	kubeletCA := m.getKubeletCA(ctx)
 	if kubeletCA == nil {
 		// This is not a fatal error.  The renewal authorization flow
 		// depending on the existing serving cert will be skipped.
 		klog.Errorf("failed to get kubelet CA")
 	}
 
-	if authorize, err := authorizeCSR(m.WorkloadClient, m.Config, machines, &csr, parsedCSR, kubeletCA); !authorize {
+	if authorize, err := authorizeCSR(m.WorkloadClient, m.Config, machines, csr, parsedCSR, kubeletCA); !authorize {
 		// Don't deny since it might be someone else's CSR
 		klog.Infof("%s: CSR not authorized", csr.Name)
 		return err
 	}
 
-	if err := approve(m.NodeRestCfg, &csr); err != nil {
+	if err := approve(ctx, m.NodeRestCfg, csr); err != nil {
 		return fmt.Errorf("Unable to approve CSR %s: %w", csr.Name, err)
 	}
 	klog.Infof("CSR %s approved", csr.Name)
@@ -297,13 +321,13 @@ func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigning
 
 // getKubeletCA fetches the kubelet CA from the ConfigMap in the
 // openshift-config-managed namespace.
-func (m *CertificateApprover) getKubeletCA() *x509.CertPool {
+func (m *CertificateApprover) getKubeletCA(ctx context.Context) *x509.CertPool {
 	configMap := &corev1.ConfigMap{}
 	key := client.ObjectKey{
 		Namespace: configNamespace,
 		Name:      kubeletCAConfigMap,
 	}
-	if err := m.WorkloadClient.Get(context.Background(), key, configMap); err != nil {
+	if err := m.WorkloadClient.Get(ctx, key, configMap); err != nil {
 		klog.Errorf("failed to get kubelet CA: %v", err)
 		return nil
 	}
@@ -324,7 +348,7 @@ func (m *CertificateApprover) getKubeletCA() *x509.CertPool {
 	return certPool
 }
 
-func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) error {
+func approve(ctx context.Context, rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) error {
 	needsupdate := false
 	now := metav1.Now()
 	condition := certificatesv1.CertificateSigningRequestCondition{
@@ -333,7 +357,7 @@ func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) e
 		Message:            csrConditionApproveMessage,
 		LastUpdateTime:     now,
 		LastTransitionTime: now,
-		Status:             "True",
+		Status:             corev1.ConditionTrue,
 	}
 
 	// Check if the new condition already exists, and change it only if there is a status
@@ -363,11 +387,31 @@ func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) e
 			return err
 		}
 		if _, err := certClient.CertificateSigningRequests().
-			UpdateApproval(context.Background(), csr.Name, csr, metav1.UpdateOptions{}); err != nil {
+			UpdateApproval(ctx, csr.Name, csr, metav1.UpdateOptions{}); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+func deny(ctx context.Context, certClient certificatesv1client.CertificateSigningRequestInterface, csr *certificatesv1.CertificateSigningRequest) error {
+	now := metav1.Now()
+	updated := csr.DeepCopy()
+	updated.Status.Conditions = append(updated.Status.Conditions, certificatesv1.CertificateSigningRequestCondition{
+		Type:               certificatesv1.CertificateDenied,
+		Reason:             csrConditionDenyReason,
+		Message:            csrConditionDenyMessage,
+		LastUpdateTime:     now,
+		LastTransitionTime: now,
+		Status:             corev1.ConditionTrue,
+	})
+
+	if _, err := certClient.UpdateApproval(ctx, updated.Name, updated, metav1.UpdateOptions{}); err != nil {
+		return err
+	}
+	csr.Status = updated.Status
+	DuplicateCSRDeniedTotal.Inc()
 	return nil
 }
 
