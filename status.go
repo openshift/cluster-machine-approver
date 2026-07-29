@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	osconfigv1 "github.com/openshift/api/config/v1"
@@ -95,8 +96,15 @@ func (c *statusController) runWorker() {
 func (c *statusController) Run(threadiness int, stopCh chan struct{}) {
 	defer utilruntime.HandleCrash()
 
-	// Let the workers stop when we are done
-	defer c.queue.ShutDown()
+	// Shut down the queue then wait for workers on every exit path (cache-sync
+	// failure or stopCh) so an in-flight sync cannot recreate ClusterOperator
+	// state after Run returns.
+	var wg sync.WaitGroup
+	defer func() {
+		c.queue.ShutDown()
+		wg.Wait()
+	}()
+
 	klog.Info("Starting cluster operator status controller")
 
 	go c.clusterOperatorInformer.Run(stopCh)
@@ -110,7 +118,11 @@ func (c *statusController) Run(threadiness int, stopCh chan struct{}) {
 	go c.watchVersionGetter(stopCh)
 
 	for i := 0; i < threadiness; i++ {
-		go wait.Until(c.runWorker, time.Second, stopCh)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			wait.Until(c.runWorker, time.Second, stopCh)
+		}()
 	}
 
 	<-stopCh
@@ -191,7 +203,7 @@ func (c *statusController) statusAvailable() error {
 			Status:             osconfigv1.ConditionTrue,
 			LastTransitionTime: metav1.Now(),
 			Reason:             reasonAsExpected,
-			Message:            fmt.Sprintf("Cluster Machine Approver is available at %s", c.versionGetter.GetVersions()["operator"]),
+			Message:            fmt.Sprintf("Cluster Machine Approver is available at %s", c.operatorVersion()),
 		},
 		{
 			Type:               osconfigv1.OperatorDegraded,
@@ -216,8 +228,15 @@ func (c *statusController) statusAvailable() error {
 		},
 	}
 
-	co.Status.Versions = []osconfigv1.OperandVersion{{Name: "operator", Version: getReleaseVersion()}}
+	co.Status.Versions = []osconfigv1.OperandVersion{{Name: operatorVersionKey, Version: c.operatorVersion()}}
 	return c.syncStatus(co, conds)
+}
+
+func (c *statusController) operatorVersion() string {
+	if version := c.versionGetter.GetVersions()[operatorVersionKey]; len(version) > 0 {
+		return version
+	}
+	return getReleaseVersion()
 }
 
 func (c *statusController) getOrCreateClusterOperator() (*osconfigv1.ClusterOperator, error) {

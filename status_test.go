@@ -122,15 +122,17 @@ var _ = Describe("Cluster Operator status controller", func() {
 			close(startController) // Ensure that existingCO is created before starting the statusController.
 
 			var co *osconfigv1.ClusterOperator
-			Eventually(func() (bool, error) {
+			Eventually(func() (string, error) {
 				var err error
 				co, err = osClient.ConfigV1().ClusterOperators().Get(context.Background(), clusterOperatorName, metav1.GetOptions{})
 				if err != nil {
-					return false, err
+					return "", err
 				}
-				// Successful sync means CO exists and the status is not empty
-				return len(co.Status.Versions) > 0, nil
-			}, timeout).Should(BeTrue())
+				if len(co.Status.Versions) == 0 {
+					return "", nil
+				}
+				return co.Status.Versions[0].Version, nil
+			}, timeout).Should(Equal(expectedVersion))
 
 			// check version.
 			Expect(co.Status.Versions).To(HaveLen(1))
