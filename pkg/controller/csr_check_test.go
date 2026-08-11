@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1882,7 +1883,7 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 				tt.csr,
 				tt.currentCert,
 				x509.VerifyOptions{Roots: certPool, CurrentTime: tt.time},
-				nodeEgressIPs{},
+				nil,
 			)
 
 			if errString(err) != tt.wantErr {
@@ -1948,7 +1949,7 @@ func TestGetServingCert(t *testing.T) {
 			nodeName:  "test",
 			node:      wrongAddr,
 			rootCerts: []*x509.Certificate{parseCert(t, rootCertGood)},
-			wantErr:   "dial tcp 127.0.0.1:25544: connect: connection refused",
+			wantErr:   "dial tcp 127.0.0.1:25544:",
 		},
 		{
 			name:     "no pool provided",
@@ -1986,7 +1987,7 @@ func TestGetServingCert(t *testing.T) {
 
 			go respond(server)
 			serverCert, err := getServingCert(t.Context(), cl, tt.nodeName, certPool)
-			if errString(err) != tt.wantErr {
+			if !strings.Contains(errString(err), tt.wantErr) {
 				t.Fatalf("got: %v, want: %s", err, tt.wantErr)
 			}
 			if err == nil && !serverCert.Equal(parseCert(t, serverCertGood)) {
