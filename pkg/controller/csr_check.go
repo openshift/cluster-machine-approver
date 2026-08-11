@@ -14,7 +14,6 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
-	networkv1 "github.com/openshift/api/network/v1"
 	operatorv1 "github.com/openshift/api/operator/v1"
 	machinehandlerpkg "github.com/openshift/cluster-machine-approver/pkg/machinehandler"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -80,19 +79,12 @@ func newCSRValidationError(format string, args ...interface{}) *CSRValidationErr
 	return &CSRValidationError{msg: fmt.Sprintf(format, args...)}
 }
 
-// nodeEgressIPs holds the egress IPs and CIDRs assigned to a node.
-type nodeEgressIPs struct {
-	IPs   []net.IP
-	CIDRs []*net.IPNet
-}
-
 // getNodeEgressIPs returns the egress IPs assigned to the given node.
 // It determines the network type and queries the appropriate CRD:
 // - OVNKubernetes: queries EgressIP objects from k8s.ovn.org/v1
-// - OpenShiftSDN: queries HostSubnet objects
 // For unknown network types, it returns an empty result with no error.
-func getNodeEgressIPs(ctx context.Context, c client.Client, nodeName string) (nodeEgressIPs, error) {
-	result := nodeEgressIPs{}
+func getNodeEgressIPs(ctx context.Context, c client.Client, nodeName string) ([]net.IP, error) {
+	var result []net.IP
 
 	network := &configv1.Network{}
 	if err := c.Get(ctx, client.ObjectKey{Name: networkClusterName}, network); err != nil {
@@ -109,27 +101,10 @@ func getNodeEgressIPs(ctx context.Context, c client.Client, nodeName string) (no
 			for _, item := range eip.Status.Items {
 				if item.Node == nodeName {
 					if ip := net.ParseIP(item.EgressIP); ip != nil {
-						result.IPs = append(result.IPs, ip)
+						result = append(result, ip)
 					}
 				}
 			}
-		}
-	case string(operatorv1.NetworkTypeOpenShiftSDN):
-		hostSubnet := &networkv1.HostSubnet{}
-		if err := c.Get(ctx, client.ObjectKey{Name: nodeName}, hostSubnet); err != nil {
-			return result, fmt.Errorf("could not fetch HostSubnet: %v", err)
-		}
-		for _, ipAddr := range hostSubnet.EgressIPs {
-			if ip := net.ParseIP(string(ipAddr)); ip != nil {
-				result.IPs = append(result.IPs, ip)
-			}
-		}
-		for _, egressCIDR := range hostSubnet.EgressCIDRs {
-			_, cidr, err := net.ParseCIDR(string(egressCIDR))
-			if err != nil {
-				return result, fmt.Errorf("could not parse Egress CIDR: %v", err)
-			}
-			result.CIDRs = append(result.CIDRs, cidr)
 		}
 	default:
 		klog.Infof("Network type %q does not support EgressIP lookup, skipping", network.Status.NetworkType)
@@ -293,7 +268,7 @@ func authorizeCSR(
 	if machineErr == nil {
 		// IPI path: node has a machine. Check against machine addresses + egress IPs.
 		klog.Infof("%s: Node has machine, using machine-api authorization", nodeAsking)
-		if err := authorizeServingCertWithMachine(machine, req, nodeAsking, csr, egress); err != nil {
+		if err := authorizeServingCertWithMachine(machine, req, csr, egress); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -378,7 +353,7 @@ func authorizeNodeClientCSR(ctx context.Context, c client.Client, machines []mac
 // The current certificate must be signed by the current CA and not expired.
 // The common name on the current certificate must match the expected value.
 // All Subject Alternate Name values must match between CSR and current cert.
-func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, options x509.VerifyOptions, egress nodeEgressIPs) error {
+func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, options x509.VerifyOptions, egressIPs []net.IP) error {
 	if err := verifyCertificateCommonName(nodeName, csr, currentCert, options); err != nil {
 		return newCSRValidationError("%v", err)
 	}
@@ -394,8 +369,8 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 	}
 
 	// CSR IP addresses must be a subset of (current cert IPs + egress IPs).
-	allowedIPs := append(currentCert.IPAddresses, egress.IPs...)
-	if !subsetIPAddresses(egress.CIDRs, allowedIPs, csr.IPAddresses) {
+	allowedIPs := append(currentCert.IPAddresses, egressIPs...)
+	if !subsetIPAddresses(allowedIPs, csr.IPAddresses) {
 		return newCSRValidationError("CSR Subject Alternate Names includes unknown IP addresses")
 	}
 
@@ -406,7 +381,7 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 // certificate.
 //
 // The current certificate must be signed by the current CA and not expired.
-func authorizeServingCertWithMachine(targetMachine *machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, nodeAsking string, csr *x509.CertificateRequest, egress nodeEgressIPs) error {
+func authorizeServingCertWithMachine(targetMachine *machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest, egressIPs []net.IP) error {
 	// SAN checks for both DNS and IPs, e.g.,
 	// DNS:ip-10-0-152-205, DNS:ip-10-0-152-205.ec2.internal, IP Address:10.0.152.205, IP Address:10.0.152.205
 	// All names in the request must correspond to addresses assigned to a single machine.
@@ -460,7 +435,7 @@ func authorizeServingCertWithMachine(targetMachine *machinehandlerpkg.Machine, r
 		}(); !foundSan {
 			// The CSR requested an IP not in machine addresses.
 			// Check if it's an egress IP assigned to this node.
-			if ipInSet(egress.CIDRs, makeIPSet(egress.IPs), san) {
+			if ipInSet(makeIPSet(egressIPs), san) {
 				continue
 			}
 
@@ -682,16 +657,14 @@ func equalIPAddresses(a, b []net.IP) bool {
 }
 
 // subsetIPAddresses tests whether the set sub is contained within the set super.
-// If an element of sub does not exist in super but does exist within cidrs, this
-// is also considered a part of the superset.
-func subsetIPAddresses(cidrs []*net.IPNet, super, sub []net.IP) bool {
+func subsetIPAddresses(super, sub []net.IP) bool {
 	superSet := make(map[string]struct{})
 	for _, ipAddr := range super {
 		superSet[ipAddr.String()] = struct{}{}
 	}
 
 	for _, ipAddr := range sub {
-		if !ipInSet(cidrs, superSet, ipAddr) {
+		if !ipInSet(superSet, ipAddr) {
 			return false
 		}
 	}
@@ -707,18 +680,9 @@ func makeIPSet(ips []net.IP) map[string]struct{} {
 	return set
 }
 
-func ipInSet(cidrs []*net.IPNet, ipSet map[string]struct{}, ipAddr net.IP) bool {
-	if _, ok := ipSet[ipAddr.String()]; ok {
-		return ok
-	}
-
-	for _, cidr := range cidrs {
-		if cidr.Contains(ipAddr) {
-			return true
-		}
-	}
-
-	return false
+func ipInSet(ipSet map[string]struct{}, ipAddr net.IP) bool {
+	_, ok := ipSet[ipAddr.String()]
+	return ok
 }
 
 // csrSANs returns the Subject Alternative Name values for the given
