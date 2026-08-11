@@ -201,12 +201,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - network.openshift.io
-  resources:
-  - hostsubnets
-  verbs:
-  - get
-- apiGroups:
   - k8s.ovn.org
   resources:
   - egressips
