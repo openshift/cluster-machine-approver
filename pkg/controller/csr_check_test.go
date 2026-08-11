@@ -21,7 +21,6 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
-	networkv1 "github.com/openshift/api/network/v1"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -80,7 +79,6 @@ func init() {
 	now = testingclock.NewFakePassiveClock(baseTime).Now
 
 	err := errors.Join(
-		networkv1.AddToScheme(scheme.Scheme),
 		configv1.AddToScheme(scheme.Scheme),
 		egressipv1.AddToScheme(scheme.Scheme),
 	)
@@ -266,24 +264,6 @@ func Test_authorizeCSR(t *testing.T) {
 		return node
 	}
 
-	hostSubnet := func(name string) *networkv1.HostSubnet {
-		return &networkv1.HostSubnet{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
-		}
-	}
-
-	withEgressIPs := func(hostSubnet *networkv1.HostSubnet, egressIPs ...networkv1.HostSubnetEgressIP) *networkv1.HostSubnet {
-		hostSubnet.EgressIPs = egressIPs
-		return hostSubnet
-	}
-
-	withEgressCIDRs := func(hostSubnet *networkv1.HostSubnet, egressCIDRs ...networkv1.HostSubnetEgressCIDR) *networkv1.HostSubnet {
-		hostSubnet.EgressCIDRs = egressCIDRs
-		return hostSubnet
-	}
-
 	var makeMachine = func(nodeName string, addresses ...corev1.NodeAddress) machinehandlerpkg.Machine {
 		if len(addresses) == 0 {
 			addresses = []corev1.NodeAddress{
@@ -336,7 +316,6 @@ func Test_authorizeCSR(t *testing.T) {
 		csr           string
 		ca            []*x509.Certificate
 		networkType   string
-		hostSubnet    *networkv1.HostSubnet
 		egressIPObjs  []egressipv1.EgressIP
 	}
 	tests := []struct {
@@ -1559,82 +1538,6 @@ func Test_authorizeCSR(t *testing.T) {
 			wantErr:   "current serving cert has bad common name",
 			authorize: false,
 		},
-		{
-			name: "CSR extra address not in egress IPs",
-			args: args{
-				node: withName("test", defaultNode()),
-				req: &certificatesv1.CertificateSigningRequest{
-					Spec: certificatesv1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1.KeyUsage{
-							certificatesv1.UsageDigitalSignature,
-							certificatesv1.UsageKeyEncipherment,
-							certificatesv1.UsageServerAuth,
-						},
-						Username: "system:node:test",
-						Groups: []string{
-							"system:authenticated",
-							"system:nodes",
-						},
-					},
-				},
-				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  hostSubnet("test"),
-				ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			},
-			wantErr:   "CSR Subject Alternate Names includes unknown IP addresses",
-			authorize: false,
-		},
-		{
-			name: "CSR extra address in egress IPs",
-			args: args{
-				node: withName("test", defaultNode()),
-				req: &certificatesv1.CertificateSigningRequest{
-					Spec: certificatesv1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1.KeyUsage{
-							certificatesv1.UsageDigitalSignature,
-							certificatesv1.UsageKeyEncipherment,
-							certificatesv1.UsageServerAuth,
-						},
-						Username: "system:node:test",
-						Groups: []string{
-							"system:authenticated",
-							"system:nodes",
-						},
-					},
-				},
-				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  withEgressIPs(hostSubnet("test"), "99.0.1.1"),
-				ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			},
-			authorize: true,
-		},
-		{
-			name: "CSR extra address in egress CIDRs",
-			args: args{
-				node: withName("test", defaultNode()),
-				req: &certificatesv1.CertificateSigningRequest{
-					Spec: certificatesv1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1.KeyUsage{
-							certificatesv1.UsageDigitalSignature,
-							certificatesv1.UsageKeyEncipherment,
-							certificatesv1.UsageServerAuth,
-						},
-						Username: "system:node:test",
-						Groups: []string{
-							"system:authenticated",
-							"system:nodes",
-						},
-					},
-				},
-				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  withEgressCIDRs(hostSubnet("test"), "99.0.1.0/24"),
-				ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			},
-			authorize: true,
-		},
 		//
 		// IPI (node has machine) + OVN EgressIP tests
 		//
@@ -1714,57 +1617,6 @@ func Test_authorizeCSR(t *testing.T) {
 			},
 			wantErr:   "IP address '99.0.1.1' not in machine addresses [127.0.0.1 10.0.0.1] or egress IPs []",
 			authorize: false,
-		},
-		//
-		// IPI (node has machine) + SDN EgressIP tests
-		//
-		{
-			name: "IPI: CSR with SDN egress IP approved",
-			args: args{
-				machines: []machinehandlerpkg.Machine{makeMachine("test")},
-				req: &certificatesv1.CertificateSigningRequest{
-					Spec: certificatesv1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1.KeyUsage{
-							certificatesv1.UsageDigitalSignature,
-							certificatesv1.UsageKeyEncipherment,
-							certificatesv1.UsageServerAuth,
-						},
-						Username: "system:node:test",
-						Groups: []string{
-							"system:authenticated",
-							"system:nodes",
-						},
-					},
-				},
-				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  withEgressIPs(hostSubnet("test"), "99.0.1.1"),
-			},
-			authorize: true,
-		},
-		{
-			name: "IPI: CSR with SDN egress CIDR approved",
-			args: args{
-				machines: []machinehandlerpkg.Machine{makeMachine("test")},
-				req: &certificatesv1.CertificateSigningRequest{
-					Spec: certificatesv1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1.KeyUsage{
-							certificatesv1.UsageDigitalSignature,
-							certificatesv1.UsageKeyEncipherment,
-							certificatesv1.UsageServerAuth,
-						},
-						Username: "system:node:test",
-						Groups: []string{
-							"system:authenticated",
-							"system:nodes",
-						},
-					},
-				},
-				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  withEgressCIDRs(hostSubnet("test"), "99.0.1.0/24"),
-			},
-			authorize: true,
 		},
 		//
 		// UPI (no machine) + OVN EgressIP tests
@@ -1899,9 +1751,6 @@ func Test_authorizeCSR(t *testing.T) {
 			objs := []runtime.Object{network}
 			if tt.args.node != nil {
 				objs = append(objs, tt.args.node)
-			}
-			if tt.args.hostSubnet != nil {
-				objs = append(objs, tt.args.hostSubnet)
 			}
 			for i := range tt.args.egressIPObjs {
 				objs = append(objs, &tt.args.egressIPObjs[i])
@@ -2584,12 +2433,9 @@ func TestSubsetIPAddresses(t *testing.T) {
 	tenDotOne := net.ParseIP("10.0.0.1")
 	tenDotTwo := net.ParseIP("10.0.0.2")
 	tenDotThree := net.ParseIP("10.0.0.3")
-	tenOneThree := net.ParseIP("10.0.1.3")
-	_, tenNoughtSlash24, _ := net.ParseCIDR("10.0.0.0/24")
 
 	tests := []struct {
 		name     string
-		cidrs    []*net.IPNet
 		super    []net.IP
 		sub      []net.IP
 		expected bool
@@ -2618,18 +2464,11 @@ func TestSubsetIPAddresses(t *testing.T) {
 			sub:      []net.IP{tenDotOne, tenDotOne},
 			expected: true,
 		},
-		{
-			name:     "sub is a subset when cidrs are included",
-			cidrs:    []*net.IPNet{tenNoughtSlash24},
-			super:    []net.IP{tenOneThree},
-			sub:      []net.IP{tenDotOne, tenOneThree},
-			expected: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if equal := subsetIPAddresses(tt.cidrs, tt.super, tt.sub); equal != tt.expected {
+			if equal := subsetIPAddresses(tt.super, tt.sub); equal != tt.expected {
 				t.Errorf("%v subset of %v :: wanted %v, got %v",
 					tt.sub, tt.super, tt.expected, equal)
 			}

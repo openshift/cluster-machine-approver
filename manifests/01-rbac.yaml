@@ -193,19 +193,21 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - network.openshift.io
+    - config.openshift.io
   resources:
-  - hostsubnets
+    - apiservers
   verbs:
-  - get
+    - get
+    - list
+    - watch
 - apiGroups:
-  - k8s.ovn.org
+    - k8s.ovn.org
   resources:
-  - egressips
+    - egressips
   verbs:
-  - get
-  - list
-  - watch
+    - get
+    - list
+    - watch
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -222,6 +224,6 @@ roleRef:
   kind: ClusterRole
   name: system:openshift:controller:machine-approver
 subjects:
-- kind: ServiceAccount
-  namespace: openshift-cluster-machine-approver
-  name: machine-approver-sa
+  - kind: ServiceAccount
+    namespace: openshift-cluster-machine-approver
+    name: machine-approver-sa
