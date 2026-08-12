@@ -35,7 +35,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 			result, err := ResolveTLSConfig(ctx, cfg, "VersionTLS12", []string{
 				"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
 				"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -51,7 +51,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 		It("should not set cipher suites when TLS 1.3 is specified", func() {
 			result, err := ResolveTLSConfig(ctx, cfg, "VersionTLS13", []string{
 				"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -63,7 +63,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 
 		It("should accept TLS 1.3 cipher suites from the Modern profile", func() {
 			modernProfile := configv1.TLSProfiles[configv1.TLSProfileModernType]
-			result, err := ResolveTLSConfig(ctx, cfg, string(modernProfile.MinTLSVersion), modernProfile.Ciphers)
+			result, err := ResolveTLSConfig(ctx, cfg, string(modernProfile.MinTLSVersion), modernProfile.Ciphers, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -76,7 +76,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 		It("should not populate TLSAdherencePolicy or TLSProfileSpec", func() {
 			result, err := ResolveTLSConfig(ctx, cfg, "VersionTLS12", []string{
 				"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-			})
+			}, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(result.TLSAdherencePolicy).To(BeEmpty())
@@ -86,7 +86,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 		It("should return an error for an invalid TLS version", func() {
 			_, err := ResolveTLSConfig(ctx, cfg, "InvalidVersion", []string{
 				"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-			})
+			}, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("invalid --tls-min-version"))
 		})
@@ -94,7 +94,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 		It("should return an error for an invalid cipher suite", func() {
 			_, err := ResolveTLSConfig(ctx, cfg, "VersionTLS12", []string{
 				"INVALID_CIPHER_SUITE",
-			})
+			}, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("invalid --tls-cipher-suites"))
 		})
@@ -125,7 +125,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 				return k8sClient.Create(ctx, apiServer)
 			}).Should(Succeed())
 
-			result, err := ResolveTLSConfig(ctx, cfg, "", nil)
+			result, err := ResolveTLSConfig(ctx, cfg, "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -153,7 +153,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 				return k8sClient.Create(ctx, apiServer)
 			}).Should(Succeed())
 
-			result, err := ResolveTLSConfig(ctx, cfg, "", nil)
+			result, err := ResolveTLSConfig(ctx, cfg, "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -184,7 +184,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 				return k8sClient.Create(ctx, apiServer)
 			}).Should(Succeed())
 
-			result, err := ResolveTLSConfig(ctx, cfg, "", nil)
+			result, err := ResolveTLSConfig(ctx, cfg, "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -218,7 +218,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 				return k8sClient.Create(ctx, apiServer)
 			}).Should(Succeed())
 
-			result, err := ResolveTLSConfig(ctx, cfg, "", nil)
+			result, err := ResolveTLSConfig(ctx, cfg, "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -232,7 +232,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 		})
 
 		It("should gracefully default when no APIServer resource exists", func() {
-			result, err := ResolveTLSConfig(ctx, cfg, "", nil)
+			result, err := ResolveTLSConfig(ctx, cfg, "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			tlsCfg := &tls.Config{}
@@ -261,7 +261,7 @@ var _ = Describe("ResolveTLSConfig", func() {
 				return k8sClient.Create(ctx, apiServer)
 			}).Should(Succeed())
 
-			result, err := ResolveTLSConfig(ctx, cfg, "", nil)
+			result, err := ResolveTLSConfig(ctx, cfg, "", nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(result.TLSAdherencePolicy).To(Equal(configv1.TLSAdherencePolicyStrictAllComponents))
