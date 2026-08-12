@@ -6,10 +6,10 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
-	github.com/openshift/api v0.0.0-20260728120005-8ba0b25b0f29
-	github.com/openshift/client-go v0.0.0-20260723174158-ae2315de9d73
+	github.com/openshift/api v0.0.0-20260805215214-cfb63858e9d7
+	github.com/openshift/client-go v0.0.0-20260806041845-b74fb348f1e7
 	github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
-	github.com/openshift/library-go v0.0.0-20260727154952-0aacacf2673e
+	github.com/openshift/library-go v0.0.0-20260807194649-ee0a87843dda
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/pflag v1.0.10
 	k8s.io/api v0.36.2
@@ -129,3 +129,6 @@ require (
 	sigs.k8s.io/kube-storage-version-migrator v0.0.6-0.20230721195810-5c8923c5ff96 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+// TODO: Remove this replace directive once the TLS groups/curve preferences support is merged and released in controller-runtime-common upstream.
+replace github.com/openshift/controller-runtime-common => github.com/damdo/controller-runtime-common v0.0.0-20260811190531-d15ac976d032
