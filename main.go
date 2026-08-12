@@ -73,6 +73,7 @@ func main() {
 	var metricsBindAddress string
 	var tlsMinVersionFlag string
 	var tlsCipherSuitesFlag []string
+	var tlsCurvePreferencesFlag []int32
 
 	flagSet := flag.NewFlagSet("cluster-machine-approver", flag.ExitOnError)
 
@@ -99,6 +100,7 @@ func main() {
 	flagSet.StringVar(&metricsBindAddress, "metrics-bind-address", metrics.DefaultMetricsBindAddress, "the address the metrics endpoint binds to.")
 	flagSet.StringVar(&tlsMinVersionFlag, "tls-min-version", "", "Minimum TLS version supported. When set, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSPossibleVersions(), ", "))
 	flagSet.StringSliceVar(&tlsCipherSuitesFlag, "tls-cipher-suites", nil, "Comma-separated list of cipher suites for the server. When set, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSCipherPossibleValues(), ", "))
+	flagSet.Int32SliceVar(&tlsCurvePreferencesFlag, "tls-curve-preferences", nil, "Comma-separated list of TLS curve preferences (as numeric Go crypto/tls CurveID values) for the server. When set, overrides the cluster-wide TLS profile. See https://pkg.go.dev/crypto/tls#CurveID for supported values.")
 
 	// Deprecated options
 	flagSet.StringVar(&apiGroup, "apigroup", "", "API group for machines")
@@ -110,7 +112,7 @@ func main() {
 		klog.Fatal("Cannot set both --apigroup and --api-group-version options together.")
 	}
 
-	tlsOverrideFromFlags := tlsMinVersionFlag != "" || len(tlsCipherSuitesFlag) > 0
+	tlsOverrideFromFlags := tlsMinVersionFlag != "" || len(tlsCipherSuitesFlag) > 0 || len(tlsCurvePreferencesFlag) > 0
 
 	var parsedAPIGroupVersions []schema.GroupVersion
 
@@ -152,16 +154,19 @@ func main() {
 		klog.Fatalf("Can't set client configs: %v", err)
 	}
 
-	// Resolve the TLS configuration for the server endpoints.
-	tlsResult, err := pkgtls.ResolveTLSConfig(context.Background(), workloadConfig, tlsMinVersionFlag, tlsCipherSuitesFlag)
-	if err != nil {
-		klog.Fatalf("unable to configure TLS: %v", err)
-	}
-
-	// Create a context that can be cancelled when there is a need to shut down the manager	.
+	// Create a context that can be cancelled when there is a need to shut down the manager.
 	ctx, cancel := context.WithCancel(control.SetupSignalHandler())
 	// Ensure the context is cancelled when the program exits.
 	defer cancel()
+
+	// Resolve the TLS configuration for the server endpoints.
+	startupCtx, startupCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer startupCancel()
+
+	tlsResult, err := pkgtls.ResolveTLSConfig(startupCtx, workloadConfig, tlsMinVersionFlag, tlsCipherSuitesFlag, tlsCurvePreferencesFlag)
+	if err != nil {
+		klog.Fatalf("unable to configure TLS: %v", err)
+	}
 
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
