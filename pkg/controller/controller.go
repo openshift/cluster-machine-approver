@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -201,7 +202,7 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	for _, csr := range csrs {
 		if csr.Name == req.Name {
-			if err := m.reconcileCSR(csr, machines); err != nil {
+			if err := m.reconcileCSR(ctx, csr, machines); err != nil {
 				return reconcile.Result{}, fmt.Errorf("could not reconcile CSR: %v", err)
 			}
 
@@ -258,7 +259,7 @@ func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machin
 	return nil
 }
 
-func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) error {
+func (m *CertificateApprover) reconcileCSR(ctx context.Context, csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) error {
 	// If a CSR is approved after being added to the queue, but before we reconcile it,
 	// it may have already been approved. If it has already been approved, trying to
 	// approve it again will result in an error and cause a loop.
@@ -274,17 +275,23 @@ func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigning
 		return fmt.Errorf("error parsing request CSR: %v", err)
 	}
 
-	kubeletCA := m.getKubeletCA()
-	if kubeletCA == nil {
-		// This is not a fatal error.  The renewal authorization flow
-		// depending on the existing serving cert will be skipped.
-		klog.Errorf("failed to get kubelet CA")
-	}
+	if authorize, err := authorizeCSR(ctx, m.WorkloadClient, m.Config, machines, &csr, parsedCSR); !authorize {
+		if err != nil {
+			var validationErr *CSRValidationError
+			if errors.As(err, &validationErr) {
+				// Validation failure — CSR is invalid, log and don't retry
+				klog.Infof("%s: CSR not authorized: %v", csr.Name, err)
+				return nil
+			}
+			// Infrastructure error — retry
+			klog.Errorf("%s: error authorizing CSR: %v", csr.Name, err)
+			return err
+		}
 
-	if authorize, err := authorizeCSR(m.WorkloadClient, m.Config, machines, &csr, parsedCSR, kubeletCA); !authorize {
+		// No error, just not auto-approvable (e.g. not a node cert we handle)
 		// Don't deny since it might be someone else's CSR
 		klog.Infof("%s: CSR not authorized", csr.Name)
-		return err
+		return nil
 	}
 
 	if err := approve(m.NodeRestCfg, &csr); err != nil {
@@ -293,35 +300,6 @@ func (m *CertificateApprover) reconcileCSR(csr certificatesv1.CertificateSigning
 	klog.Infof("CSR %s approved", csr.Name)
 
 	return nil
-}
-
-// getKubeletCA fetches the kubelet CA from the ConfigMap in the
-// openshift-config-managed namespace.
-func (m *CertificateApprover) getKubeletCA() *x509.CertPool {
-	configMap := &corev1.ConfigMap{}
-	key := client.ObjectKey{
-		Namespace: configNamespace,
-		Name:      kubeletCAConfigMap,
-	}
-	if err := m.WorkloadClient.Get(context.Background(), key, configMap); err != nil {
-		klog.Errorf("failed to get kubelet CA: %v", err)
-		return nil
-	}
-
-	caBundle, ok := configMap.Data["ca-bundle.crt"]
-	if !ok {
-		klog.Errorf("no ca-bundle.crt in %s", kubeletCAConfigMap)
-		return nil
-	}
-
-	certPool := x509.NewCertPool()
-
-	if ok := certPool.AppendCertsFromPEM([]byte(caBundle)); !ok {
-		klog.Errorf("failed to parse ca-bundle.crt in %s", kubeletCAConfigMap)
-		return nil
-	}
-
-	return certPool
 }
 
 func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) error {

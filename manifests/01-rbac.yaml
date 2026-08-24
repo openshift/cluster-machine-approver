@@ -201,11 +201,13 @@ rules:
   - list
   - watch
 - apiGroups:
-  - network.openshift.io
+  - k8s.ovn.org
   resources:
-  - hostsubnets
+  - egressips
   verbs:
   - get
+  - list
+  - watch
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
