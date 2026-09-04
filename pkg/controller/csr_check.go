@@ -14,12 +14,12 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
-	networkv1 "github.com/openshift/api/network/v1"
+	operatorv1 "github.com/openshift/api/operator/v1"
 	machinehandlerpkg "github.com/openshift/cluster-machine-approver/pkg/machinehandler"
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,8 +41,7 @@ const (
 	maxMachineClockSkew = 10 * time.Second
 	maxMachineDelta     = 2 * time.Hour
 
-	networkTypeOpenShiftSDN = "OpenShiftSDN"
-	networkClusterName      = "cluster"
+	networkClusterName = "cluster"
 )
 
 var clientKubeletFieldSelector = fmt.Sprintf("%s=%s", signerNameField, certificatesv1.KubeAPIServerClientKubeletSignerName)
@@ -63,6 +62,81 @@ var now = time.Now
 
 var MaxPendingCSRs uint32
 var PendingCSRs uint32
+
+// CSRValidationError represents a CSR that was evaluated and found invalid.
+// This is distinct from infrastructure errors (e.g. API call failures) which
+// should cause the controller to retry. Validation errors should be logged
+// but not retried.
+type CSRValidationError struct {
+	msg string
+}
+
+func (e *CSRValidationError) Error() string {
+	return e.msg
+}
+
+func newCSRValidationError(format string, args ...interface{}) *CSRValidationError {
+	return &CSRValidationError{msg: fmt.Sprintf(format, args...)}
+}
+
+// getNodeEgressIPs returns the egress IPs assigned to the given node.
+// It determines the network type and queries the appropriate CRD:
+// - OVNKubernetes: queries EgressIP objects from k8s.ovn.org/v1
+// For unknown network types, it returns an empty result with no error.
+func getNodeEgressIPs(ctx context.Context, c client.Client, nodeName string) ([]net.IP, error) {
+	var result []net.IP
+
+	network := &configv1.Network{}
+	if err := c.Get(ctx, client.ObjectKey{Name: networkClusterName}, network); err != nil {
+		return result, fmt.Errorf("could not fetch cluster network: %v", err)
+	}
+
+	switch network.Status.NetworkType {
+	case string(operatorv1.NetworkTypeOVNKubernetes):
+		egressIPList := &egressipv1.EgressIPList{}
+		if err := c.List(ctx, egressIPList); err != nil {
+			return result, fmt.Errorf("could not list EgressIP objects: %v", err)
+		}
+		for _, eip := range egressIPList.Items {
+			for _, item := range eip.Status.Items {
+				if item.Node == nodeName {
+					if ip := net.ParseIP(item.EgressIP); ip != nil {
+						result = append(result, ip)
+					}
+				}
+			}
+		}
+	default:
+		klog.Infof("Network type %q does not support EgressIP lookup, skipping", network.Status.NetworkType)
+	}
+
+	return result, nil
+}
+
+// getKubeletCA fetches the kubelet CA from the ConfigMap in the
+// openshift-config-managed namespace.
+func getKubeletCA(ctx context.Context, c client.Client) (*x509.CertPool, error) {
+	configMap := &corev1.ConfigMap{}
+	key := client.ObjectKey{
+		Namespace: configNamespace,
+		Name:      kubeletCAConfigMap,
+	}
+	if err := c.Get(ctx, key, configMap); err != nil {
+		return nil, fmt.Errorf("failed to get kubelet CA: %v", err)
+	}
+
+	caBundle, ok := configMap.Data["ca-bundle.crt"]
+	if !ok {
+		return nil, fmt.Errorf("no ca-bundle.crt in %s", kubeletCAConfigMap)
+	}
+
+	certPool := x509.NewCertPool()
+	if ok := certPool.AppendCertsFromPEM([]byte(caBundle)); !ok {
+		return nil, fmt.Errorf("failed to parse ca-bundle.crt in %s", kubeletCAConfigMap)
+	}
+
+	return certPool, nil
+}
 
 func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (string, error) {
 	if !strings.HasPrefix(req.Spec.Username, nodeUserPrefix) {
@@ -150,12 +224,12 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 // For server certificates:
 // Names contained in the CSR are checked against addresses in the corresponding node's machine status.
 func authorizeCSR(
+	ctx context.Context,
 	c client.Client,
 	config ClusterMachineApproverConfig,
 	machines []machinehandlerpkg.Machine,
 	req *certificatesv1.CertificateSigningRequest,
 	csr *x509.CertificateRequest,
-	ca *x509.CertPool,
 ) (bool, error) {
 	if req == nil || csr == nil {
 		klog.Errorf("authorizeCSR invalid request")
@@ -167,7 +241,7 @@ func authorizeCSR(
 			klog.Errorf("%v: CSR rejected as the flow is disabled", req.Name)
 			return false, fmt.Errorf("CSR %s for node client cert rejected as the flow is disabled", req.Name)
 		}
-		return authorizeNodeClientCSR(c, machines, req, csr)
+		return authorizeNodeClientCSR(ctx, c, machines, req, csr)
 	}
 
 	klog.Infof("%v: CSR does not appear to be client csr", req.Name)
@@ -182,69 +256,51 @@ func authorizeCSR(
 		return false, nil
 	}
 
-	var approvalErrors []error
-
-	// Check for an existing serving cert from the node.  If found, use the
-	// renewal flow.  Any error connecting to the node, including validation of
-	// the presented cert against the current Kubelet CA, will result in
-	// fallback to the original flow relying on the machine-api.
-	//
-	// This is only supported if we were given a CA to verify against.
-	var servingCert *x509.Certificate
-	if ca != nil {
-		var err error
-		servingCert, err = getServingCert(c, nodeAsking, ca)
-		if err != nil {
-			klog.Infof("Failed to retrieve current serving cert: %v", err)
-		}
+	// Look up egress IPs assigned to this node.
+	egress, err := getNodeEgressIPs(ctx, c, nodeAsking)
+	if err != nil {
+		return false, fmt.Errorf("could not look up egress IPs for node %s: %v", nodeAsking, err)
 	}
 
-	x509VerificationOpts := x509.VerifyOptions{Roots: ca}
-	if servingCert != nil {
-		klog.Infof("Found existing serving cert for %s", nodeAsking)
+	// Use machine API authorization if the node has a machine.
+	machine, machineErr := machinehandlerpkg.FindMatchingMachineFromNodeRef(machines, nodeAsking)
 
-		if err := authorizeServingRenewal(nodeAsking, csr, servingCert, x509VerificationOpts); err != nil {
-			approvalErrors = append(approvalErrors, err)
-			klog.Infof("Could not use current serving cert for renewal: %v", err)
-			klog.Infof("Current SAN Values: %v, CSR SAN Values: %v",
-				certSANs(servingCert), csrSANs(csr))
-		} else {
-			// No error, the renewal is authorized.
-			return true, nil
+	if machineErr == nil {
+		// IPI path: node has a machine. Check against machine addresses + egress IPs.
+		klog.Infof("%s: Node has machine, using machine-api authorization", nodeAsking)
+		if err := authorizeServingCertWithMachine(machine, req, csr, egress); err != nil {
+			return false, err
 		}
-	}
-
-	// Fall back to the original machine-api based authorization scheme.
-	klog.Infof("Falling back to machine-api authorization for %s", nodeAsking)
-	if err := authorizeServingCertWithMachine(machines, req, nodeAsking, csr); err != nil {
-		approvalErrors = append(approvalErrors, err)
-		klog.Infof("Could not use Machine for serving cert authorization: %v", err)
-	} else {
-		// No error means the machine was able to authorize the cert
 		return true, nil
 	}
 
-	egressEnabled, err := needsEgressCheck(c)
+	// UPI path: no machine. Use serving cert renewal.
+	klog.Infof("%s: No machine found, using serving cert renewal", nodeAsking)
+
+	ca, err := getKubeletCA(ctx, c)
 	if err != nil {
-		klog.Infof("Could not determine if egress enabled: %v", err)
-		return false, fmt.Errorf("could not determine if egress enabled: %v", err)
+		return false, fmt.Errorf("could not get kubelet CA: %v", err)
 	}
 
-	if servingCert != nil && egressEnabled {
-		klog.Infof("Falling back to serving cert renewal with Egress IP checks")
-		if err := authorizeServingRenewalWithEgressIPs(c, nodeAsking, csr, servingCert, x509VerificationOpts); err != nil {
-			approvalErrors = append(approvalErrors, err)
-			klog.Infof("Could not use current serving cert and egress IPs for renewal: %v", err)
-		} else {
-			// No error means the machine was able to authorize the cert
-			return true, nil
-		}
+	servingCert, err := getServingCert(ctx, c, nodeAsking, ca)
+	if err != nil {
+		// Could not reach kubelet or verify cert. Not auto-approvable on
+		// this attempt; kubelet will resubmit the CSR.
+		return false, fmt.Errorf("failed to retrieve current serving cert: %w", err)
 	}
 
-	return false, fmt.Errorf("could not authorize CSR: exhausted all authorization methods: %v", kerrors.NewAggregate(approvalErrors))
+	klog.Infof("Found existing serving cert for %s", nodeAsking)
+	x509VerificationOpts := x509.VerifyOptions{Roots: ca}
+	if err := authorizeServingRenewal(nodeAsking, csr, servingCert, x509VerificationOpts, egress); err != nil {
+		klog.Infof("Could not use current serving cert for renewal: %v", err)
+		klog.Infof("Current SAN Values: %v, CSR SAN Values: %v",
+			certSANs(servingCert), csrSANs(csr))
+		return false, err
+	}
+	return true, nil
 }
 
-func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (bool, error) {
+func authorizeNodeClientCSR(ctx context.Context, c client.Client, machines []machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest) (bool, error) {
 	if !isReqFromNodeBootstrapper(req) {
 		klog.Infof("%v: CSR does not appear to be a valid node bootstrapper client cert request", req.Name)
 		return false, nil
@@ -257,7 +313,7 @@ func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machin
 		return false, nil
 	}
 
-	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, &corev1.Node{}); err != nil && !apierrors.IsNotFound(err) {
+	if err := c.Get(ctx, client.ObjectKey{Name: nodeName}, &corev1.Node{}); err != nil && !apierrors.IsNotFound(err) {
 		// possible transient API error, requeue
 		klog.Errorf("%v: unable to get node %s error: %v", req.Name, nodeName, err)
 		return false, fmt.Errorf("failed get existing nodes %s", nodeName)
@@ -297,19 +353,25 @@ func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machin
 // The current certificate must be signed by the current CA and not expired.
 // The common name on the current certificate must match the expected value.
 // All Subject Alternate Name values must match between CSR and current cert.
-func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, options x509.VerifyOptions) error {
+func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, options x509.VerifyOptions, egressIPs []net.IP) error {
 	if err := verifyCertificateCommonName(nodeName, csr, currentCert, options); err != nil {
-		return err
+		return newCSRValidationError("%v", err)
 	}
 
-	// Check that all Subject Alternate Name values are equal.
+	// Check that all Subject Alternate Name values except IP addresses are equal.
+	// IP addresses are checked separately to allow egress IPs.
 	match := equalStrings(currentCert.DNSNames, csr.DNSNames) &&
 		equalStrings(currentCert.EmailAddresses, csr.EmailAddresses) &&
-		equalIPAddresses(currentCert.IPAddresses, csr.IPAddresses) &&
 		equalURLs(currentCert.URIs, csr.URIs)
 
 	if !match {
-		return fmt.Errorf("CSR Subject Alternate Name values do not match current certificate")
+		return newCSRValidationError("CSR Subject Alternate Name values do not match current certificate")
+	}
+
+	// CSR IP addresses must be a subset of (current cert IPs + egress IPs).
+	allowedIPs := append(currentCert.IPAddresses, egressIPs...)
+	if !subsetIPAddresses(allowedIPs, csr.IPAddresses) {
+		return newCSRValidationError("CSR Subject Alternate Names includes unknown IP addresses")
 	}
 
 	return nil
@@ -319,66 +381,7 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 // certificate.
 //
 // The current certificate must be signed by the current CA and not expired.
-// The common name on the current certificate must match the expected value.
-// All non IP address Subject Alternate Name values must match between CSR and current cert.
-//
-// The requested IP address Subject Alternate Name values must be a subset of the union of the
-// IP Address values within the current certificate and the egress IP addresses assigned to the
-// Node.
-//
-// TODO: Once CCMs are GA, we should be able to exclude the egress networks via the CCM configuration.
-// Investigate that this is the case and remove this fallback if appropriate.
-func authorizeServingRenewalWithEgressIPs(c client.Client, nodeName string, csr *x509.CertificateRequest, currentCert *x509.Certificate, options x509.VerifyOptions) error {
-	if err := verifyCertificateCommonName(nodeName, csr, currentCert, options); err != nil {
-		return err
-	}
-
-	// Check that all Subject Alternate Name values except IP addresses are equal.
-	// IP addresses will be verified separately.
-	match := equalStrings(currentCert.DNSNames, csr.DNSNames) &&
-		equalStrings(currentCert.EmailAddresses, csr.EmailAddresses) &&
-		equalURLs(currentCert.URIs, csr.URIs)
-
-	if !match {
-		return fmt.Errorf("CSR Subject Alternate Name values do not match current certificate")
-	}
-
-	hostSubnet := &networkv1.HostSubnet{}
-	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, hostSubnet); err != nil {
-		return fmt.Errorf("could not fetch hostsubnet: %v", err)
-	}
-
-	allowedIPAddresses := currentCert.IPAddresses
-	for _, ipAddr := range hostSubnet.EgressIPs {
-		allowedIPAddresses = append(allowedIPAddresses, net.ParseIP(string(ipAddr)))
-	}
-
-	allowedCIDRs := []*net.IPNet{}
-	for _, egressCIDR := range hostSubnet.EgressCIDRs {
-		_, cidr, err := net.ParseCIDR(string(egressCIDR))
-		if err != nil {
-			return fmt.Errorf("could not parse Egress CIDR: %v", err)
-		}
-		allowedCIDRs = append(allowedCIDRs, cidr)
-	}
-
-	if !subsetIPAddresses(allowedCIDRs, allowedIPAddresses, csr.IPAddresses) {
-		return fmt.Errorf("CSR Subject Alternate Names includes unknown IP addresses")
-	}
-
-	return nil
-}
-
-func authorizeServingCertWithMachine(machines []machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, nodeAsking string, csr *x509.CertificateRequest) error {
-	// Check that we have a registered node with the request name
-	targetMachine, err := machinehandlerpkg.FindMatchingMachineFromNodeRef(machines, nodeAsking)
-	if err != nil {
-		klog.Errorf("%v: Serving Cert: No target machine for node %q", req.Name, nodeAsking)
-		//TODO: set annotation/emit event here.
-		// Return error so we requeue in case we're racing with node linker.
-		return fmt.Errorf("unable to find machine for node")
-	}
-
+func authorizeServingCertWithMachine(targetMachine *machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest, egressIPs []net.IP) error {
 	// SAN checks for both DNS and IPs, e.g.,
 	// DNS:ip-10-0-152-205, DNS:ip-10-0-152-205.ec2.internal, IP Address:10.0.152.205, IP Address:10.0.152.205
 	// All names in the request must correspond to addresses assigned to a single machine.
@@ -407,7 +410,7 @@ func authorizeServingCertWithMachine(machines []machinehandlerpkg.Machine, req *
 			// return error so we requeue, in case machine network is out of date
 			// for some reason
 			klog.Errorf("%v: DNS name '%s' not in machine names: %s", req.Name, san, strings.Join(attemptedAddresses, " "))
-			return fmt.Errorf("DNS name '%s' not in machine names: %s", san, strings.Join(attemptedAddresses, " "))
+			return newCSRValidationError("DNS name '%s' not in machine names: %s", san, strings.Join(attemptedAddresses, " "))
 		}
 	}
 
@@ -430,13 +433,19 @@ func authorizeServingCertWithMachine(machines []machinehandlerpkg.Machine, req *
 			}
 			return false, attemptedAddresses
 		}(); !foundSan {
-			// The CSR requested an IP name that did not belong to the machine
+			// The CSR requested an IP not in machine addresses.
+			// Check if it's an egress IP assigned to this node.
+			if ipInSet(makeIPSet(egressIPs), san) {
+				continue
+			}
 
 			//TODO: set annotation/emit event here.
-			// return error so we requeue, in case machine network is out of date
-			// for some reason
-			klog.Errorf("%v: IP address '%s' not in machine addresses: %s", req.Name, san, strings.Join(attemptedAddresses, " "))
-			return fmt.Errorf("IP address '%s' not in machine addresses: %s", san, strings.Join(attemptedAddresses, " "))
+			egressAddresses := make([]string, 0, len(egressIPs))
+			for _, ip := range egressIPs {
+				egressAddresses = append(egressAddresses, ip.String())
+			}
+			klog.Errorf("%v: IP address '%s' not in machine addresses [%s] or egress IPs [%s]", req.Name, san, strings.Join(attemptedAddresses, " "), strings.Join(egressAddresses, " "))
+			return newCSRValidationError("IP address '%s' not in machine addresses [%s] or egress IPs [%s]", san, strings.Join(attemptedAddresses, " "), strings.Join(egressAddresses, " "))
 		}
 	}
 
@@ -536,13 +545,13 @@ func recentlyPendingNodeCSRs(csrs []certificatesv1.CertificateSigningRequest) in
 // If successful, and the returned TLS certificate is validated against the
 // given CA, the node's serving certificate as presented over the established
 // connection is returned.
-func getServingCert(c client.Client, nodeName string, ca *x509.CertPool) (*x509.Certificate, error) {
+func getServingCert(ctx context.Context, c client.Client, nodeName string, ca *x509.CertPool) (*x509.Certificate, error) {
 	if ca == nil {
 		return nil, fmt.Errorf("no CA found: will not retrieve serving cert")
 	}
 
 	node := &corev1.Node{}
-	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, node); err != nil {
+	if err := c.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
 		return nil, err
 	}
 
@@ -554,22 +563,30 @@ func getServingCert(c client.Client, nodeName string, ca *x509.CertPool) (*x509.
 	port := strconv.Itoa(int(node.Status.DaemonEndpoints.KubeletEndpoint.Port))
 
 	kubelet := net.JoinHostPort(host, port)
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	tlsConfig := &tls.Config{
-		RootCAs:    ca,
-		ServerName: host,
+	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: 30 * time.Second},
+		Config: &tls.Config{
+			RootCAs:    ca,
+			ServerName: host,
+		},
 	}
 
 	klog.Infof("retrieving serving cert from %s (%s)", nodeName, kubelet)
 
-	conn, err := tls.DialWithDialer(dialer, "tcp", kubelet, tlsConfig)
+	conn, err := dialer.DialContext(ctx, "tcp", kubelet)
 	if err != nil {
 		return nil, err
 	}
 
 	defer conn.Close()
 
-	cert := conn.ConnectionState().PeerCertificates[0]
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		// This should never happen
+		return nil, fmt.Errorf("connection is not a TLS connection")
+	}
+
+	cert := tlsConn.ConnectionState().PeerCertificates[0]
 
 	return cert, nil
 }
@@ -583,16 +600,6 @@ func nodeInternalIP(node *corev1.Node) (string, error) {
 	}
 
 	return "", fmt.Errorf("node %s has no internal addresses", node.Name)
-}
-
-// needsEgressCheck determines whether or not egress IP checks should be enabled.
-func needsEgressCheck(c client.Client) (bool, error) {
-	network := &configv1.Network{}
-	if err := c.Get(context.Background(), client.ObjectKey{Name: networkClusterName}, network); err != nil {
-		return false, fmt.Errorf("could not fetch cluster network: %v", err)
-	}
-
-	return network.Status.NetworkType == networkTypeOpenShiftSDN, nil
 }
 
 // equalStrings tests whether two slices of strings are equal.
@@ -650,16 +657,14 @@ func equalIPAddresses(a, b []net.IP) bool {
 }
 
 // subsetIPAddresses tests whether the set sub is contained within the set super.
-// If an element of sub does not exist in super but does exist within cidrs, this
-// is also considered a part of the superset.
-func subsetIPAddresses(cidrs []*net.IPNet, super, sub []net.IP) bool {
+func subsetIPAddresses(super, sub []net.IP) bool {
 	superSet := make(map[string]struct{})
 	for _, ipAddr := range super {
 		superSet[ipAddr.String()] = struct{}{}
 	}
 
 	for _, ipAddr := range sub {
-		if !ipInSet(cidrs, superSet, ipAddr) {
+		if !ipInSet(superSet, ipAddr) {
 			return false
 		}
 	}
@@ -667,18 +672,17 @@ func subsetIPAddresses(cidrs []*net.IPNet, super, sub []net.IP) bool {
 	return true
 }
 
-func ipInSet(cidrs []*net.IPNet, ipSet map[string]struct{}, ipAddr net.IP) bool {
-	if _, ok := ipSet[ipAddr.String()]; ok {
-		return ok
+func makeIPSet(ips []net.IP) map[string]struct{} {
+	set := make(map[string]struct{}, len(ips))
+	for _, ip := range ips {
+		set[ip.String()] = struct{}{}
 	}
+	return set
+}
 
-	for _, cidr := range cidrs {
-		if cidr.Contains(ipAddr) {
-			return true
-		}
-	}
-
-	return false
+func ipInSet(ipSet map[string]struct{}, ipAddr net.IP) bool {
+	_, ok := ipSet[ipAddr.String()]
+	return ok
 }
 
 // csrSANs returns the Subject Alternative Name values for the given
