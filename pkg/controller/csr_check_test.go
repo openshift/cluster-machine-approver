@@ -11,16 +11,18 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
-	networkv1 "github.com/openshift/api/network/v1"
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,8 +78,14 @@ var defaultDNSNames []string
 
 func init() {
 	now = testingclock.NewFakePassiveClock(baseTime).Now
-	networkv1.AddToScheme(scheme.Scheme)
-	configv1.AddToScheme(scheme.Scheme)
+
+	err := errors.Join(
+		configv1.AddToScheme(scheme.Scheme),
+		egressipv1.AddToScheme(scheme.Scheme),
+	)
+	if err != nil {
+		panic(err)
+	}
 
 	// Genereate a CA cert valid for the next 12 hours
 	rootCert, rootKey, err := generateCertKeyPair(12*time.Hour, nil, nil, "system:node:test")
@@ -257,24 +265,6 @@ func Test_authorizeCSR(t *testing.T) {
 		return node
 	}
 
-	hostSubnet := func(name string) *networkv1.HostSubnet {
-		return &networkv1.HostSubnet{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
-		}
-	}
-
-	withEgressIPs := func(hostSubnet *networkv1.HostSubnet, egressIPs ...networkv1.HostSubnetEgressIP) *networkv1.HostSubnet {
-		hostSubnet.EgressIPs = egressIPs
-		return hostSubnet
-	}
-
-	withEgressCIDRs := func(hostSubnet *networkv1.HostSubnet, egressCIDRs ...networkv1.HostSubnetEgressCIDR) *networkv1.HostSubnet {
-		hostSubnet.EgressCIDRs = egressCIDRs
-		return hostSubnet
-	}
-
 	var makeMachine = func(nodeName string, addresses ...corev1.NodeAddress) machinehandlerpkg.Machine {
 		if len(addresses) == 0 {
 			addresses = []corev1.NodeAddress{
@@ -310,6 +300,14 @@ func Test_authorizeCSR(t *testing.T) {
 		}
 	}
 
+	ovnEgressIP := func(name string, items ...egressipv1.EgressIPStatusItem) egressipv1.EgressIP {
+		return egressipv1.EgressIP{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       egressipv1.EgressIPSpec{EgressIPs: []string{}},
+			Status:     egressipv1.EgressIPStatus{Items: items},
+		}
+	}
+
 	type args struct {
 		config        ClusterMachineApproverConfig
 		machines      []machinehandlerpkg.Machine
@@ -319,7 +317,7 @@ func Test_authorizeCSR(t *testing.T) {
 		csr           string
 		ca            []*x509.Certificate
 		networkType   string
-		hostSubnet    *networkv1.HostSubnet
+		egressIPObjs  []egressipv1.EgressIP
 	}
 	tests := []struct {
 		name      string
@@ -451,7 +449,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: unable to find machine for node",
+			wantErr:   "could not get kubelet CA: failed to get kubelet CA: configmaps \"csr-controller-ca\" not found",
 			authorize: false,
 		},
 		{
@@ -743,7 +741,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: extraAddr,
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: IP address '99.0.1.1' not in machine addresses: 127.0.0.1 10.0.0.1",
+			wantErr:   "IP address '99.0.1.1' not in machine addresses [127.0.0.1 10.0.0.1] or egress IPs []",
 			authorize: false,
 		},
 		{
@@ -773,7 +771,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: IP address '10.0.0.1' not in machine addresses: 127.0.0.1 10.0.0.2",
+			wantErr:   "IP address '10.0.0.1' not in machine addresses [127.0.0.1 10.0.0.2] or egress IPs []",
 			authorize: false,
 		},
 		{
@@ -803,7 +801,7 @@ func Test_authorizeCSR(t *testing.T) {
 				},
 				csr: goodCSR,
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: DNS name 'node1' not in machine names: node1.local node2",
+			wantErr:   "DNS name 'node1' not in machine names: node1.local node2",
 			authorize: false,
 		},
 		{
@@ -1538,13 +1536,16 @@ func Test_authorizeCSR(t *testing.T) {
 				ca:            []*x509.Certificate{parseCert(t, differentCert)},
 				kubeletServer: fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort+1), differentCert, differentKey),
 			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: [current serving cert has bad common name, unable to find machine for node]",
+			wantErr:   "current serving cert has bad common name",
 			authorize: false,
 		},
+		//
+		// IPI (node has machine) + OVN EgressIP tests
+		//
 		{
-			name: "CSR extra address not in egress IPs",
+			name: "IPI: CSR with OVN egress IP approved",
 			args: args{
-				node: withName("test", defaultNode()),
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1560,40 +1561,69 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  hostSubnet("test"),
-				ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			},
-			wantErr:   "could not authorize CSR: exhausted all authorization methods: [CSR Subject Alternate Name values do not match current certificate, unable to find machine for node, CSR Subject Alternate Names includes unknown IP addresses]",
-			authorize: false,
-		},
-		{
-			name: "CSR extra address in egress IPs",
-			args: args{
-				node: withName("test", defaultNode()),
-				req: &certificatesv1.CertificateSigningRequest{
-					Spec: certificatesv1.CertificateSigningRequestSpec{
-						Usages: []certificatesv1.KeyUsage{
-							certificatesv1.UsageDigitalSignature,
-							certificatesv1.UsageKeyEncipherment,
-							certificatesv1.UsageServerAuth,
-						},
-						Username: "system:node:test",
-						Groups: []string{
-							"system:authenticated",
-							"system:nodes",
-						},
-					},
+				networkType: "OVNKubernetes",
+				egressIPObjs: []egressipv1.EgressIP{
+					ovnEgressIP("eip-1", egressipv1.EgressIPStatusItem{Node: "test", EgressIP: "99.0.1.1"}),
 				},
-				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  withEgressIPs(hostSubnet("test"), "99.0.1.1"),
-				ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
 			},
 			authorize: true,
 		},
 		{
-			name: "CSR extra address in egress CIDRs",
+			name: "IPI: CSR with OVN egress IP not assigned to node",
+			args: args{
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr:         extraAddr,
+				networkType: "OVNKubernetes",
+				egressIPObjs: []egressipv1.EgressIP{
+					ovnEgressIP("eip-1", egressipv1.EgressIPStatusItem{Node: "other-node", EgressIP: "99.0.1.1"}),
+				},
+			},
+			wantErr:   "IP address '99.0.1.1' not in machine addresses [127.0.0.1 10.0.0.1] or egress IPs []",
+			authorize: false,
+		},
+		{
+			name: "IPI: CSR with removed egress IP denied",
+			args: args{
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr:         extraAddr,
+				networkType: "OVNKubernetes",
+			},
+			wantErr:   "IP address '99.0.1.1' not in machine addresses [127.0.0.1 10.0.0.1] or egress IPs []",
+			authorize: false,
+		},
+		//
+		// UPI (no machine) + OVN EgressIP tests
+		//
+		{
+			name: "UPI: CSR with OVN egress IP approved",
 			args: args{
 				node: withName("test", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
@@ -1611,9 +1641,89 @@ func Test_authorizeCSR(t *testing.T) {
 					},
 				},
 				csr:         extraAddr,
-				networkType: "OpenShiftSDN",
-				hostSubnet:  withEgressCIDRs(hostSubnet("test"), "99.0.1.0/24"),
-				ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
+				networkType: "OVNKubernetes",
+				egressIPObjs: []egressipv1.EgressIP{
+					ovnEgressIP("eip-1", egressipv1.EgressIPStatusItem{Node: "test", EgressIP: "99.0.1.1"}),
+				},
+				ca: []*x509.Certificate{parseCert(t, rootCertGood)},
+			},
+			authorize: true,
+		},
+		{
+			name: "UPI: CSR with OVN egress IP not assigned to node",
+			args: args{
+				node: withName("test", defaultNode()),
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr:         extraAddr,
+				networkType: "OVNKubernetes",
+				egressIPObjs: []egressipv1.EgressIP{
+					ovnEgressIP("eip-1", egressipv1.EgressIPStatusItem{Node: "other-node", EgressIP: "99.0.1.1"}),
+				},
+				ca: []*x509.Certificate{parseCert(t, rootCertGood)},
+			},
+			wantErr:   "CSR Subject Alternate Names includes unknown IP addresses",
+			authorize: false,
+		},
+		//
+		// Unknown network type
+		//
+		{
+			name: "IPI: unknown network type ignores egress IPs",
+			args: args{
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr:         extraAddr,
+				networkType: "Calico",
+			},
+			wantErr:   "IP address '99.0.1.1' not in machine addresses [127.0.0.1 10.0.0.1] or egress IPs []",
+			authorize: false,
+		},
+		{
+			name: "IPI: unknown network type approves CSR without extra IPs",
+			args: args{
+				machines: []machinehandlerpkg.Machine{makeMachine("test")},
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageServerAuth,
+						},
+						Username: "system:node:test",
+						Groups: []string{
+							"system:authenticated",
+							"system:nodes",
+						},
+					},
+				},
+				csr:         goodCSR,
+				networkType: "Calico",
 			},
 			authorize: true,
 		},
@@ -1643,9 +1753,32 @@ func Test_authorizeCSR(t *testing.T) {
 			if tt.args.node != nil {
 				objs = append(objs, tt.args.node)
 			}
-			if tt.args.hostSubnet != nil {
-				objs = append(objs, tt.args.hostSubnet)
+			for i := range tt.args.egressIPObjs {
+				objs = append(objs, &tt.args.egressIPObjs[i])
 			}
+
+			// If a CA is specified, add the kubelet CA configmap and start
+			// the fake kubelet server for serving cert retrieval.
+			if len(tt.args.ca) > 0 {
+				caBundle := ""
+				for _, cert := range tt.args.ca {
+					caBundle += string(pem.EncodeToMemory(&pem.Block{
+						Type:  "CERTIFICATE",
+						Bytes: cert.Raw,
+					}))
+				}
+				objs = append(objs, &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: configNamespace,
+						Name:      kubeletCAConfigMap,
+					},
+					Data: map[string]string{
+						"ca-bundle.crt": caBundle,
+					},
+				})
+				go respond(kubeletServer)
+			}
+
 			cl := fake.NewFakeClient(objs...)
 			tt.args.req.Spec.Request = []byte(tt.args.csr)
 			parsedCSR, err := parseCSR(tt.args.req)
@@ -1656,22 +1789,13 @@ func Test_authorizeCSR(t *testing.T) {
 				return
 			}
 
-			var ca *x509.CertPool
-			if len(tt.args.ca) > 0 {
-				// Start renewal flow
-				ca = x509.NewCertPool()
-				for _, cert := range tt.args.ca {
-					ca.AddCert(cert)
-				}
-				go respond(kubeletServer)
-			}
-			if authorize, err := authorizeCSR(cl, tt.args.config, tt.args.machines, tt.args.req, parsedCSR, ca); authorize != tt.authorize || errString(err) != tt.wantErr {
-				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, tt.wantErr)
+			if authorize, err := authorizeCSR(t.Context(), cl, tt.args.config, tt.args.machines, tt.args.req, parsedCSR); authorize != tt.authorize || errString(err) != tt.wantErr {
+				t.Errorf("authorizeCSR() authorize = %v (want %v), error = %v, wantErr %s", authorize, tt.authorize, err, tt.wantErr)
 			}
 		})
 
 		t.Run("Invalid call", func(t *testing.T) {
-			if authorize, err := authorizeCSR(nil, tt.args.config, tt.args.machines, nil, nil, nil); authorize != false {
+			if authorize, err := authorizeCSR(t.Context(), nil, tt.args.config, tt.args.machines, nil, nil); authorize != false {
 				t.Errorf("authorizeCSR() error = %v, wantErr %s", err, "Invalid request")
 			}
 		})
@@ -1717,7 +1841,7 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 			currentCert: parseCert(t, serverCertGood),
 			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
 			time:        presetTimeCorrect,
-			wantErr:     "CSR Subject Alternate Name values do not match current certificate",
+			wantErr:     "CSR Subject Alternate Names includes unknown IP addresses",
 		},
 		{
 			name:        "No certificate match",
@@ -1759,145 +1883,7 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 				tt.csr,
 				tt.currentCert,
 				x509.VerifyOptions{Roots: certPool, CurrentTime: tt.time},
-			)
-
-			if errString(err) != tt.wantErr {
-				t.Errorf("got: %v, want: %s", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestAuthorizeServingRenewalWithEgressIPs(t *testing.T) {
-	testNodeName := "test"
-
-	tests := []struct {
-		name        string
-		nodeName    string
-		csr         *x509.CertificateRequest
-		currentCert *x509.Certificate
-		ca          []*x509.Certificate
-		time        time.Time
-		hostSubnet  *networkv1.HostSubnet
-		wantErr     string
-	}{
-		{
-			name:     "missing args",
-			nodeName: "panda",
-			wantErr:  "CSR, serving cert, or CA not provided",
-		},
-		{
-			name:        "all good",
-			nodeName:    testNodeName,
-			csr:         parseCR(t, goodCSR),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			time:        presetTimeCorrect,
-			hostSubnet: &networkv1.HostSubnet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testNodeName,
-				},
-			},
-		},
-		{
-			name:        "reject expired",
-			nodeName:    testNodeName,
-			csr:         parseCR(t, goodCSR),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			time:        presetTimeExpired,
-			wantErr:     fmt.Sprintf("x509: certificate has expired or is not yet valid: current time %s is before %s", presetTimeExpired.Format(time.RFC3339), presetTimeCorrect.Format(time.RFC3339)),
-		},
-		{
-			name:        "With additional unknown IP address",
-			nodeName:    testNodeName,
-			csr:         parseCR(t, extraAddr),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			time:        presetTimeCorrect,
-			hostSubnet: &networkv1.HostSubnet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testNodeName,
-				},
-			},
-			wantErr: "CSR Subject Alternate Names includes unknown IP addresses",
-		},
-		{
-			name:        "With additional Egress IP address",
-			nodeName:    testNodeName,
-			csr:         parseCR(t, extraAddr),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			time:        presetTimeCorrect,
-			hostSubnet: &networkv1.HostSubnet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testNodeName,
-				},
-				EgressIPs: []networkv1.HostSubnetEgressIP{"99.0.1.1"},
-			},
-		},
-		{
-			name:        "With additional Egress IP in Egress CIDRs",
-			nodeName:    testNodeName,
-			csr:         parseCR(t, extraAddr),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			time:        presetTimeCorrect,
-			hostSubnet: &networkv1.HostSubnet{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testNodeName,
-				},
-				EgressCIDRs: []networkv1.HostSubnetEgressCIDR{"99.0.1.0/24"},
-			},
-		},
-		{
-			name:        "No certificate match",
-			nodeName:    testNodeName,
-			csr:         parseCR(t, goodCSR),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{},
-			time:        presetTimeCorrect,
-			wantErr:     "x509: certificate signed by unknown authority",
-		},
-		{
-			name:        "Request from different node",
-			nodeName:    testNodeName,
-			csr:         parseCR(t, otherName),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			time:        presetTimeCorrect,
-			wantErr:     "current serving cert and CSR common name mismatch",
-		},
-		{
-			name:        "Unexpected CN",
-			nodeName:    "panda",
-			csr:         parseCR(t, goodCSR),
-			currentCert: parseCert(t, serverCertGood),
-			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
-			time:        presetTimeCorrect,
-			wantErr:     "current serving cert has bad common name",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			certPool := x509.NewCertPool()
-			for _, cert := range tt.ca {
-				certPool.AddCert(cert)
-			}
-
-			objs := []runtime.Object{}
-			if tt.hostSubnet != nil {
-				objs = append(objs, tt.hostSubnet)
-			}
-			cl := fake.NewFakeClient(objs...)
-
-			err := authorizeServingRenewalWithEgressIPs(
-				cl,
-				tt.nodeName,
-				tt.csr,
-				tt.currentCert,
-				x509.VerifyOptions{Roots: certPool, CurrentTime: tt.time},
+				nil,
 			)
 
 			if errString(err) != tt.wantErr {
@@ -1963,7 +1949,7 @@ func TestGetServingCert(t *testing.T) {
 			nodeName:  "test",
 			node:      wrongAddr,
 			rootCerts: []*x509.Certificate{parseCert(t, rootCertGood)},
-			wantErr:   "dial tcp 127.0.0.1:25544: connect: connection refused",
+			wantErr:   "dial tcp 127.0.0.1:25544:",
 		},
 		{
 			name:     "no pool provided",
@@ -2000,8 +1986,8 @@ func TestGetServingCert(t *testing.T) {
 			cl := fake.NewFakeClient(objects...)
 
 			go respond(server)
-			serverCert, err := getServingCert(cl, tt.nodeName, certPool)
-			if errString(err) != tt.wantErr {
+			serverCert, err := getServingCert(t.Context(), cl, tt.nodeName, certPool)
+			if !strings.Contains(errString(err), tt.wantErr) {
 				t.Fatalf("got: %v, want: %s", err, tt.wantErr)
 			}
 			if err == nil && !serverCert.Equal(parseCert(t, serverCertGood)) {
@@ -2448,12 +2434,9 @@ func TestSubsetIPAddresses(t *testing.T) {
 	tenDotOne := net.ParseIP("10.0.0.1")
 	tenDotTwo := net.ParseIP("10.0.0.2")
 	tenDotThree := net.ParseIP("10.0.0.3")
-	tenOneThree := net.ParseIP("10.0.1.3")
-	_, tenNoughtSlash24, _ := net.ParseCIDR("10.0.0.0/24")
 
 	tests := []struct {
 		name     string
-		cidrs    []*net.IPNet
 		super    []net.IP
 		sub      []net.IP
 		expected bool
@@ -2482,18 +2465,11 @@ func TestSubsetIPAddresses(t *testing.T) {
 			sub:      []net.IP{tenDotOne, tenDotOne},
 			expected: true,
 		},
-		{
-			name:     "sub is a subset when cidrs are included",
-			cidrs:    []*net.IPNet{tenNoughtSlash24},
-			super:    []net.IP{tenOneThree},
-			sub:      []net.IP{tenDotOne, tenOneThree},
-			expected: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if equal := subsetIPAddresses(tt.cidrs, tt.super, tt.sub); equal != tt.expected {
+			if equal := subsetIPAddresses(tt.super, tt.sub); equal != tt.expected {
 				t.Errorf("%v subset of %v :: wanted %v, got %v",
 					tt.sub, tt.super, tt.expected, equal)
 			}
