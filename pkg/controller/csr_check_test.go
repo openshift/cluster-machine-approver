@@ -1802,6 +1802,68 @@ func Test_authorizeCSR(t *testing.T) {
 	}
 }
 
+func TestAuthorizeServingCertWithMachineAddressReadiness(t *testing.T) {
+	tests := []struct {
+		name              string
+		addresses         []corev1.NodeAddress
+		requestedIP       string
+		wantErr           string
+		wantValidationErr bool
+	}{
+		{
+			name:              "empty machine addresses are retryable",
+			addresses:         nil,
+			requestedIP:       "10.0.0.1",
+			wantErr:           "machine addresses are not populated yet",
+			wantValidationErr: false,
+		},
+		{
+			name: "populated mismatched addresses are permanent",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.2"},
+			},
+			requestedIP:       "10.0.0.1",
+			wantErr:           "IP address '10.0.0.1' not in machine addresses [10.0.0.2] or egress IPs []",
+			wantValidationErr: true,
+		},
+		{
+			name: "matching address is authorized",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			requestedIP:       "10.0.0.1",
+			wantErr:           "",
+			wantValidationErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			machine := &machinehandlerpkg.Machine{
+				Status: machinehandlerpkg.MachineStatus{
+					NodeRef:   &corev1.ObjectReference{Name: "node-0"},
+					Addresses: tt.addresses,
+				},
+			}
+
+			err := authorizeServingCertWithMachine(
+				machine,
+				&certificatesv1.CertificateSigningRequest{ObjectMeta: metav1.ObjectMeta{Name: "test-csr"}},
+				&x509.CertificateRequest{IPAddresses: []net.IP{net.ParseIP(tt.requestedIP)}},
+				nil,
+			)
+			if errString(err) != tt.wantErr {
+				t.Fatalf("authorizeServingCertWithMachine() error = %v, want %q", err, tt.wantErr)
+			}
+
+			var validationErr *CSRValidationError
+			if got := errors.As(err, &validationErr); got != tt.wantValidationErr {
+				t.Fatalf("authorizeServingCertWithMachine() CSRValidationError = %v, want %v", got, tt.wantValidationErr)
+			}
+		})
+	}
+}
+
 func TestAuthorizeServingRenewal(t *testing.T) {
 	tests := []struct {
 		name        string
