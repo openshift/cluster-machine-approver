@@ -382,6 +382,12 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 //
 // The current certificate must be signed by the current CA and not expired.
 func authorizeServingCertWithMachine(targetMachine *machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest, egressIPs []net.IP) error {
+	// NodeRef and Addresses are populated independently. A serving CSR can be
+	// reconciled after NodeRef is set but before Addresses are available.
+	if len(targetMachine.Status.Addresses) == 0 {
+		return fmt.Errorf("machine addresses are not populated yet")
+	}
+
 	// SAN checks for both DNS and IPs, e.g.,
 	// DNS:ip-10-0-152-205, DNS:ip-10-0-152-205.ec2.internal, IP Address:10.0.152.205, IP Address:10.0.152.205
 	// All names in the request must correspond to addresses assigned to a single machine.
