@@ -6,10 +6,10 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
-	github.com/openshift/api v0.0.0-20260728120005-8ba0b25b0f29
-	github.com/openshift/client-go v0.0.0-20260723174158-ae2315de9d73
-	github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
-	github.com/openshift/library-go v0.0.0-20260727154952-0aacacf2673e
+	github.com/openshift/api v0.0.0-20260805215214-cfb63858e9d7
+	github.com/openshift/client-go v0.0.0-20260806041845-b74fb348f1e7
+	github.com/openshift/controller-runtime-common v0.0.0-20260813135806-e1187ec555fc
+	github.com/openshift/library-go v0.0.0-20260807194649-ee0a87843dda
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v0.0.0-20260811083613-bf0b30b853a7
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/pflag v1.0.10
