@@ -38,8 +38,8 @@ const (
 var _ = Describe("Cluster Operator status controller", func() {
 	var osClient *osclientset.Clientset
 	var statusController *statusController
-	var stop chan struct{}           // signals the controller goroutine to stop
-	var done chan struct{}           // closed when the controller goroutine has exited
+	var stop chan struct{}            // signals the controller goroutine to stop
+	var done chan struct{}            // closed when the controller goroutine has exited
 	var startController chan struct{} // closed by the test body to start the controller after any pre-existing CO is created
 
 	BeforeEach(func() {
