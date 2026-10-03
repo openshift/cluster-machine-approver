@@ -45,8 +45,7 @@ spec:
         - containerPort: 9194
           name: https
           protocol: TCP
-        terminationMessagePath: /dev/termination-log
-        terminationMessagePolicy: File
+        terminationMessagePolicy: FallbackToLogsOnError
         resources:
           requests:
             memory: 20Mi
