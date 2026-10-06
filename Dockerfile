@@ -1,10 +1,11 @@
 FROM registry.ci.openshift.org/openshift/release:golang-1.26 AS builder
 WORKDIR /go/src/github.com/openshift/cluster-machine-approver
 COPY . .
-RUN make build
+RUN make build && gzip -n bin/cluster-machine-approver-tests-ext
 
 FROM registry.ci.openshift.org/openshift/origin-v4.0:base
 COPY --from=builder /go/src/github.com/openshift/cluster-machine-approver/machine-approver /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/cluster-machine-approver/bin/cluster-machine-approver-tests-ext.gz /usr/bin/cluster-machine-approver-tests-ext.gz
 COPY manifests /manifests
 ENTRYPOINT ["/usr/bin/machine-approver"]
 LABEL io.k8s.display-name="OpenShift cluster-machine-approver" \

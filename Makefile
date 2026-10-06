@@ -36,9 +36,13 @@ else
   IMAGE_BUILD_CMD = $(ENGINE) build
 endif
 
-all build:
+all build: cluster-machine-approver-tests-ext
 	$(DOCKER_CMD) go build -o machine-approver .
 .PHONY: all build
+
+cluster-machine-approver-tests-ext:
+	$(DOCKER_CMD) sh -c 'mkdir -p bin && cd openshift-tests-extension && GOFLAGS= go build -mod=vendor -o ../bin/cluster-machine-approver-tests-ext ./cmd/'
+.PHONY: cluster-machine-approver-tests-ext
 
 test: unit
 .PHONY: test
@@ -59,7 +63,7 @@ endif
 .PHONY: images
 
 clean:
-	$(DOCKER_CMD) $(RM) ./machine-approver
+	$(DOCKER_CMD) $(RM) ./machine-approver ./bin/cluster-machine-approver-tests-ext ./bin/cluster-machine-approver-tests-ext.gz
 .PHONY: clean
 
 test-e2e: ## Run e2e tests
@@ -69,3 +73,4 @@ test-e2e: ## Run e2e tests
 .PHONY: vendor
 vendor:
 	$(DOCKER_CMD) hack/go-mod.sh
+	$(DOCKER_CMD) sh -c 'cd openshift-tests-extension && GOFLAGS= go mod tidy && GOFLAGS= go mod vendor && GOFLAGS= go mod verify'
