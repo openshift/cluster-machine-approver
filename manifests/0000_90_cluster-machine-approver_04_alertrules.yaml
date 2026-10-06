@@ -28,3 +28,21 @@ spec:
               pending CSRs to determine which machines need approval, also check
               that the nodelink controller is running in the openshift-machine-api
               namespace.
+        - alert: MachineApproverDuplicateCSRDenied
+          expr: |
+             increase(mapi_duplicate_csr_denied_total[5m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "duplicate node CSRs were denied."
+            description: |
+              Cluster Machine Approver has been denying superseded pending node
+              CertificateSigningRequests for at least 15 minutes (a newer CSR
+              exists for the same node and signer). Short one-off denials during
+              address population lag are tolerated and do not fire this alert.
+              Sustained denials usually mean kubelets keep reissuing while the
+              newest CSR stays unauthorizable (for example Machine addresses
+              missing), approval is deferred, or CMA is not approving in time.
+              Inspect pending/denied CSRs, Machine status.addresses, and
+              machine-approver logs.

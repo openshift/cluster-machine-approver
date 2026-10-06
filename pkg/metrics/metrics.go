@@ -15,12 +15,13 @@ const DefaultMetricsBindAddress = "0.0.0.0:9192"
 var (
 	// CurrentPendingCSRCountDesc is a metric to report count of pending node CSRs in the cluster
 	CurrentPendingCSRCountDesc = prometheus.NewDesc("mapi_current_pending_csr", "Count of recently pending node CSRs at the cluster level", nil, nil)
-	// MaxPendingCSRDesc is a metric to report threshold value of the pending node CSRs beyond which all CSR will be ignored by machine approver
-	MaxPendingCSRDesc = prometheus.NewDesc("mapi_max_pending_csr", "Threshold value of the pending node CSRs beyond which all CSR will be ignored by machine approver", nil, nil)
+	// MaxPendingCSRDesc is a metric to report the pending node CSR threshold used by MachineApproverMaxPendingCSRsReached
+	MaxPendingCSRDesc = prometheus.NewDesc("mapi_max_pending_csr", "Recently pending node CSR count threshold used by MachineApproverMaxPendingCSRsReached", nil, nil)
 )
 
 func init() {
 	metrics.Registry.MustRegister(&MetricsCollector{})
+	metrics.Registry.MustRegister(controller.DuplicateCSRDeniedTotal)
 }
 
 // MetricsCollector is implementing prometheus.Collector interface.
