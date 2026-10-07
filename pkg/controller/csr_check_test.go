@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -1730,14 +1731,14 @@ func Test_authorizeCSR(t *testing.T) {
 	}
 
 	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
+	go respond(t.Context(), server)
 	defer server.Close()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kubeletServer := server
 			if tt.args.kubeletServer != nil {
-				kubeletServer = tt.args.kubeletServer
-				defer kubeletServer.Close()
+				go respond(t.Context(), tt.args.kubeletServer)
+				defer tt.args.kubeletServer.Close()
 			}
 
 			network := &configv1.Network{
@@ -1776,7 +1777,6 @@ func Test_authorizeCSR(t *testing.T) {
 						"ca-bundle.crt": caBundle,
 					},
 				})
-				go respond(kubeletServer)
 			}
 
 			cl := fake.NewFakeClient(objs...)
@@ -2127,6 +2127,7 @@ func TestGetServingCert(t *testing.T) {
 	}
 
 	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
+	go respond(t.Context(), server)
 	defer server.Close()
 
 	for _, tt := range tests {
@@ -2145,8 +2146,11 @@ func TestGetServingCert(t *testing.T) {
 			}
 			cl := fake.NewFakeClient(objects...)
 
-			go respond(server)
-			serverCert, err := getServingCert(t.Context(), cl, tt.nodeName, certPool)
+			// Put a short timeout on the fetch context to avoid a 30s wait for the wrong address test case.
+			fetchCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			serverCert, err := getServingCert(fetchCtx, cl, tt.nodeName, certPool)
 			if !strings.Contains(errString(err), tt.wantErr) {
 				t.Fatalf("got: %v, want: %s", err, tt.wantErr)
 			}
@@ -2730,13 +2734,21 @@ func fakeResponder(t *testing.T, laddr, cert, key string) (server net.Listener) 
 	return
 }
 
-func respond(server net.Listener) {
-	conn, err := server.Accept()
-	if err != nil {
-		return
-	}
-	if conn != nil {
-		defer conn.Close()
-		conn.Write([]byte(server.Addr().String()))
+func respond(ctx context.Context, server net.Listener) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		conn, err := server.Accept()
+		if err != nil {
+			return
+		}
+		if conn != nil {
+			defer conn.Close()
+			conn.Write([]byte(server.Addr().String()))
+		}
 	}
 }
