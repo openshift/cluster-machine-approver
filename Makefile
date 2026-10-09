@@ -40,7 +40,7 @@ all build: cluster-machine-approver-tests-ext
 	$(DOCKER_CMD) go build -o machine-approver .
 .PHONY: all build
 
-cluster-machine-approver-tests-ext:
+cluster-machine-approver-tests-ext: vendor
 	$(DOCKER_CMD) sh -c 'mkdir -p bin && cd openshift-tests-extension && GOFLAGS= go build -mod=vendor -o ../bin/cluster-machine-approver-tests-ext ./cmd/'
 .PHONY: cluster-machine-approver-tests-ext
 

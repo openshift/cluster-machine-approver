@@ -40,6 +40,11 @@ fi
 # Print the command we are going to run as Make would.
 echo ${GINKGO} ${GINKGO_ARGS} ${GINKGO_EXTRA_ARGS} ./...
 ${GINKGO} ${GINKGO_ARGS} ${GINKGO_EXTRA_ARGS} ./...
+
+# Ginkgo detects the build-tagged e2e suite in this package and does not run its
+# ordinary testing.T tests in the default (non-e2e) build. Run those unit tests
+# separately without the e2e tag so the live-cluster suite stays opt-in.
+go test -race -v ./e2e
 # Capture the test result to exit on error after coverage.
 TEST_RESULT=$?
 

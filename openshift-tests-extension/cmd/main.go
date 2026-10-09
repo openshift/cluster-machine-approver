@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -25,23 +26,31 @@ import (
 	"github.com/openshift-eng/openshift-tests-extension/pkg/ginkgo"
 	"github.com/spf13/cobra"
 
-	e2e "github.com/openshift/cluster-machine-approver/e2e"
+	_ "github.com/openshift/cluster-machine-approver/e2e"
 )
 
 func main() {
 	registry := extension.NewRegistry()
 	ext := extension.NewExtension("openshift", "payload", "cluster-machine-approver")
 
-	// This explicitly discovers the Ginkgo specs in the e2e package and adapts
-	// them for openshift-tests; it is separate from the TestE2E Go test entrypoint.
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite()
+	serialTimeout := 2 * time.Minute
+	ext.AddSuite(extension.Suite{
+		Name:        "cluster-machine-approver/serial",
+		Description: "Serial cluster-machine-approver tests that complete within minutes.",
+		Parents:     []string{"openshift/conformance/serial"},
+		Qualifiers:  []string{`labels.exists(l, l == "Serial")`},
+		Parallelism: 1,
+		TestTimeout: &serialTimeout,
+	})
+
+	// The extension module vendors the local e2e package, so ModuleTestsOnly
+	// would incorrectly filter out these component-owned specs as vendored.
+	// This package imports no external Ginkgo specs, so including vendored specs
+	// here selects the local e2e suite.
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
 	if err != nil {
 		panic(fmt.Sprintf("couldn't build extension test specs from ginkgo: %v", err))
 	}
-	specs.AddBeforeAll(func() {
-		e2e.InitCommonVariables()
-	})
-
 	// Translate selected Ginkgo labels into OTE environment selectors.
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
 		for label := range spec.Labels {
