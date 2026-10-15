@@ -268,7 +268,7 @@ func authorizeCSR(
 	if machineErr == nil {
 		// IPI path: node has a machine. Check against machine addresses + egress IPs.
 		klog.Infof("%s: Node has machine, using machine-api authorization", nodeAsking)
-		if err := authorizeServingCertWithMachine(machine, req, csr, egress); err != nil {
+		if err := authorizeServingCertWithMachine(nodeAsking, machine, req, csr, egress); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -381,7 +381,7 @@ func authorizeServingRenewal(nodeName string, csr *x509.CertificateRequest, curr
 // certificate.
 //
 // The current certificate must be signed by the current CA and not expired.
-func authorizeServingCertWithMachine(targetMachine *machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest, egressIPs []net.IP) error {
+func authorizeServingCertWithMachine(nodeAsking string, targetMachine *machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, csr *x509.CertificateRequest, egressIPs []net.IP) error {
 	// NodeRef and Addresses are populated independently. A serving CSR can be
 	// reconciled after NodeRef is set but before Addresses are available.
 	if len(targetMachine.Status.Addresses) == 0 {
@@ -396,6 +396,12 @@ func authorizeServingCertWithMachine(targetMachine *machinehandlerpkg.Machine, r
 			continue
 		}
 		if foundSan, attemptedAddresses := func() (bool, []string) {
+			// We trust nodeAsking: it was extracted from the CSR spec.username,
+			// which is an immutable value set directly by kube-apiserver.
+			if strings.EqualFold(nodeAsking, san) {
+				return true, nil
+			}
+
 			var attemptedAddresses []string
 			for _, addr := range targetMachine.Status.Addresses {
 				switch addr.Type {

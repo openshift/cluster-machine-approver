@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -1730,14 +1731,14 @@ func Test_authorizeCSR(t *testing.T) {
 	}
 
 	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
+	go respond(t.Context(), server)
 	defer server.Close()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kubeletServer := server
 			if tt.args.kubeletServer != nil {
-				kubeletServer = tt.args.kubeletServer
-				defer kubeletServer.Close()
+				go respond(t.Context(), tt.args.kubeletServer)
+				defer tt.args.kubeletServer.Close()
 			}
 
 			network := &configv1.Network{
@@ -1776,7 +1777,6 @@ func Test_authorizeCSR(t *testing.T) {
 						"ca-bundle.crt": caBundle,
 					},
 				})
-				go respond(kubeletServer)
 			}
 
 			cl := fake.NewFakeClient(objs...)
@@ -1802,27 +1802,30 @@ func Test_authorizeCSR(t *testing.T) {
 	}
 }
 
-func TestAuthorizeServingCertWithMachineAddressReadiness(t *testing.T) {
+func TestAuthorizeServingCertWithMachine(t *testing.T) {
+	const nodeName = "node-0"
+
 	tests := []struct {
 		name              string
 		addresses         []corev1.NodeAddress
-		requestedIP       string
+		requestedIPs      []string
+		requestedDNSNames []string
 		wantErr           string
 		wantValidationErr bool
 	}{
 		{
 			name:              "empty machine addresses are retryable",
 			addresses:         nil,
-			requestedIP:       "10.0.0.1",
+			requestedIPs:      []string{"10.0.0.1"},
 			wantErr:           "machine addresses are not populated yet",
 			wantValidationErr: false,
 		},
 		{
-			name: "populated mismatched addresses are permanent",
+			name: "mismatched address is not authorized",
 			addresses: []corev1.NodeAddress{
 				{Type: corev1.NodeInternalIP, Address: "10.0.0.2"},
 			},
-			requestedIP:       "10.0.0.1",
+			requestedIPs:      []string{"10.0.0.1"},
 			wantErr:           "IP address '10.0.0.1' not in machine addresses [10.0.0.2] or egress IPs []",
 			wantValidationErr: true,
 		},
@@ -1831,9 +1834,95 @@ func TestAuthorizeServingCertWithMachineAddressReadiness(t *testing.T) {
 			addresses: []corev1.NodeAddress{
 				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
 			},
-			requestedIP:       "10.0.0.1",
+			requestedIPs:      []string{"10.0.0.1"},
 			wantErr:           "",
 			wantValidationErr: false,
+		},
+		{
+			name: "multiple matched addresses are authorized",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.2"},
+			},
+			requestedIPs:      []string{"10.0.0.2", "10.0.0.1"},
+			wantErr:           "",
+			wantValidationErr: false,
+		},
+		{
+			name: "matching and mismatched addresses are not authorized",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			requestedIPs:      []string{"10.0.0.1", "10.0.0.2"},
+			wantErr:           "IP address '10.0.0.2' not in machine addresses [10.0.0.1] or egress IPs []",
+			wantValidationErr: true,
+		},
+		{
+			name: "matching ipv6 address is authorized",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "2001:db8:1234:5678:90ab:cdef:1234:5678"},
+			},
+			requestedIPs:      []string{"2001:db8:1234:5678:90ab:cdef:1234:5678"},
+			wantErr:           "",
+			wantValidationErr: false,
+		},
+		{
+			name: "mismatched ipv6 address is not authorized",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "2001:db8:1234:5678:90ab:cdef:1234:5678"},
+			},
+			requestedIPs:      []string{"2001:db8:1234:5678:90ab:cdef:1234:5679"},
+			wantErr:           "IP address '2001:db8:1234:5678:90ab:cdef:1234:5679' not in machine addresses [2001:db8:1234:5678:90ab:cdef:1234:5678] or egress IPs []",
+			wantValidationErr: true,
+		},
+		{
+			name: "matching dual stack addresses is authorized",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+				{Type: corev1.NodeInternalIP, Address: "2001:db8:1234:5678:90ab:cdef:1234:5678"},
+			},
+			requestedIPs:      []string{"10.0.0.1", "2001:db8:1234:5678:90ab:cdef:1234:5678"},
+			wantErr:           "",
+			wantValidationErr: false,
+		},
+		{
+			name: "dns name matching node name is authorized when present in machine addresses",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeHostName, Address: nodeName},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			requestedDNSNames: []string{nodeName},
+			wantErr:           "",
+			wantValidationErr: false,
+		},
+		{
+			name: "dns name matching node name is authorized when not present in machine addresses",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			requestedDNSNames: []string{nodeName},
+			wantErr:           "",
+			wantValidationErr: false,
+		},
+		{
+			name: "custom dns name is authorized when present in machine addresses",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeHostName, Address: "custom-dns-name"},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			requestedDNSNames: []string{"custom-dns-name"},
+			wantErr:           "",
+			wantValidationErr: false,
+		},
+		{
+			name: "custom dns name is not authorized when not present in machine addresses",
+			addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeHostName, Address: nodeName},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			},
+			requestedDNSNames: []string{"custom-dns-name"},
+			wantErr:           "DNS name 'custom-dns-name' not in machine names: " + nodeName,
+			wantValidationErr: true,
 		},
 	}
 
@@ -1841,15 +1930,24 @@ func TestAuthorizeServingCertWithMachineAddressReadiness(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			machine := &machinehandlerpkg.Machine{
 				Status: machinehandlerpkg.MachineStatus{
-					NodeRef:   &corev1.ObjectReference{Name: "node-0"},
+					NodeRef:   &corev1.ObjectReference{Name: nodeName},
 					Addresses: tt.addresses,
 				},
 			}
 
+			var requestedIPs []net.IP
+			for _, ip := range tt.requestedIPs {
+				requestedIPs = append(requestedIPs, net.ParseIP(ip))
+			}
+
 			err := authorizeServingCertWithMachine(
+				nodeName,
 				machine,
 				&certificatesv1.CertificateSigningRequest{ObjectMeta: metav1.ObjectMeta{Name: "test-csr"}},
-				&x509.CertificateRequest{IPAddresses: []net.IP{net.ParseIP(tt.requestedIP)}},
+				&x509.CertificateRequest{
+					IPAddresses: requestedIPs,
+					DNSNames:    tt.requestedDNSNames,
+				},
 				nil,
 			)
 			if errString(err) != tt.wantErr {
@@ -2029,6 +2127,7 @@ func TestGetServingCert(t *testing.T) {
 	}
 
 	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
+	go respond(t.Context(), server)
 	defer server.Close()
 
 	for _, tt := range tests {
@@ -2047,8 +2146,11 @@ func TestGetServingCert(t *testing.T) {
 			}
 			cl := fake.NewFakeClient(objects...)
 
-			go respond(server)
-			serverCert, err := getServingCert(t.Context(), cl, tt.nodeName, certPool)
+			// Put a short timeout on the fetch context to avoid a 30s wait for the wrong address test case.
+			fetchCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+
+			serverCert, err := getServingCert(fetchCtx, cl, tt.nodeName, certPool)
 			if !strings.Contains(errString(err), tt.wantErr) {
 				t.Fatalf("got: %v, want: %s", err, tt.wantErr)
 			}
@@ -2632,13 +2734,21 @@ func fakeResponder(t *testing.T, laddr, cert, key string) (server net.Listener) 
 	return
 }
 
-func respond(server net.Listener) {
-	conn, err := server.Accept()
-	if err != nil {
-		return
-	}
-	if conn != nil {
-		defer conn.Close()
-		conn.Write([]byte(server.Addr().String()))
+func respond(ctx context.Context, server net.Listener) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		conn, err := server.Accept()
+		if err != nil {
+			return
+		}
+		if conn != nil {
+			defer conn.Close()
+			conn.Write([]byte(server.Addr().String()))
+		}
 	}
 }
