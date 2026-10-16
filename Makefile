@@ -74,3 +74,8 @@ test-e2e: ## Run e2e tests
 vendor:
 	$(DOCKER_CMD) hack/go-mod.sh
 	$(DOCKER_CMD) sh -c 'cd openshift-tests-extension && GOFLAGS= go mod tidy && GOFLAGS= go mod vendor && GOFLAGS= go mod verify'
+
+.PHONY: verify-vendor
+verify-vendor: vendor
+	$(DOCKER_CMD) ./hack/verify-diff.sh
+
