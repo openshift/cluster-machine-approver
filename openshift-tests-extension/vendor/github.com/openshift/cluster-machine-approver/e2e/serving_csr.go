@@ -146,8 +146,8 @@ func runServingCSRDisruption(g gomega.Gomega, ctx context.Context, client kubern
 		// Get a fresh copy of the node to avoid stale data
 		freshNode := getFreshNode(g, ctx, client, node)
 
-		// Skip this Node if it was removed or it is not settled
-		if freshNode == nil || !nodeIsSettled(freshNode, time.Now()) {
+		// Skip this Node if it was removed, replaced, or it is not settled
+		if freshNode == nil || freshNode.UID != node.UID || !nodeIsSettled(freshNode, time.Now()) {
 			continue
 		}
 
@@ -209,7 +209,7 @@ func runServingCSRDisruption(g gomega.Gomega, ctx context.Context, client kubern
 		}
 
 		freshNode = getFreshNode(g, ctx, client, node)
-		if freshNode == nil || !nodeIsSettled(freshNode, time.Now()) {
+		if freshNode == nil || freshNode.UID != node.UID || !nodeIsSettled(freshNode, time.Now()) {
 			By(fmt.Sprintf("ignoring failure on node %q which is no longer stable: %v", node.Name, singleNodeErr))
 			continue
 		}
