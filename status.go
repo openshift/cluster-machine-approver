@@ -47,6 +47,50 @@ var relatedObjects = []osconfigv1.ObjectReference{
 		Resource: "certificatesigningrequests",
 		Name:     "",
 	},
+	{
+		Group:    "rbac.authorization.k8s.io",
+		Resource: "clusterroles",
+		Name:     "system:openshift:controller:machine-approver",
+	},
+	{
+		Group:    "rbac.authorization.k8s.io",
+		Resource: "clusterroles",
+		Name:     "system:openshift:controller:machine-approver-capi",
+	},
+	{
+		Group:    "rbac.authorization.k8s.io",
+		Resource: "clusterrolebindings",
+		Name:     "system:openshift:controller:machine-approver",
+	},
+	{
+		Group:    "rbac.authorization.k8s.io",
+		Resource: "clusterrolebindings",
+		Name:     "system:openshift:controller:machine-approver-capi",
+	},
+	{
+		Group:     "rbac.authorization.k8s.io",
+		Resource:  "roles",
+		Namespace: "openshift-config-managed",
+		Name:      "machine-approver",
+	},
+	{
+		Group:     "rbac.authorization.k8s.io",
+		Resource:  "rolebindings",
+		Namespace: "openshift-config-managed",
+		Name:      "machine-approver",
+	},
+	{
+		Group:     "rbac.authorization.k8s.io",
+		Resource:  "roles",
+		Namespace: clusterOperatorNamespace,
+		Name:      "",
+	},
+	{
+		Group:     "rbac.authorization.k8s.io",
+		Resource:  "rolebindings",
+		Namespace: clusterOperatorNamespace,
+		Name:      "",
+	},
 }
 
 type statusController struct {
