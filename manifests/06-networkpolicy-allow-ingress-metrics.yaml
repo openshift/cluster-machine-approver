@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-metrics
+  namespace: openshift-cluster-machine-approver
+  annotations:
+    exclude.release.openshift.io/internal-openshift-hosted: "true"
+    include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - machine-approver
+      - machine-approver-capi
+  ingress:
+  - ports:
+    - protocol: TCP
+      port: 9192
+    - protocol: TCP
+      port: 9194
+  policyTypes:
+  - Ingress
