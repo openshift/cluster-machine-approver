@@ -1163,10 +1163,135 @@ func Test_authorizeCSR(t *testing.T) {
 			authorize: false,
 		},
 		{
-			name: "client good but node exists",
+			name: "client good but node exists without machine node ref",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
 					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
+				},
+				node: withName("panda", defaultNode()),
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// OCPBUGS-84535: after hibernate/resume >24h, kubelet re-bootstraps
+			// while Node and Machine already exist. Approve via Machine identity.
+			name: "client good existing node with matching machine node ref",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							// Machine created long ago; new-join time window would reject.
+							CreationTimestamp: creationTimestamp(-48 * time.Hour),
+						},
+						Status: machinehandlerpkg.MachineStatus{
+							NodeRef: &corev1.ObjectReference{Name: "panda"},
+							Addresses: []corev1.NodeAddress{
+								{Type: corev1.NodeInternalDNS, Address: "panda"},
+							},
+						},
+					},
+				},
+				node: withName("panda", defaultNode()),
+				req: &certificatesv1.CertificateSigningRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "hibernate-resume",
+						CreationTimestamp: creationTimestamp(10 * time.Minute),
+					},
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			name: "client good existing node with matching machine node ref and upper case DNS",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "PANDA"}),
+				},
+				node: withName("panda", defaultNode()),
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			name: "client good existing node with node ref but mismatched InternalDNS",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "not-panda"}),
+				},
+				node: withName("panda", defaultNode()),
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			name: "client good existing node with wrong machine node ref",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("other", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "panda"}),
 				},
 				node: withName("panda", defaultNode()),
 				req: &certificatesv1.CertificateSigningRequest{
