@@ -2,12 +2,13 @@
 # To update this file please contact an existing owner and request
 # to be added to the owners-gen input data.
 approvers:
-- JoelSpeed
 - RadekManak
 - damdo
 - enxebre
 - mdbooth
 - racheljpg
+advisory_approvers:
+- JoelSpeed
 reviewers:
 - RadekManak
 - damdo
