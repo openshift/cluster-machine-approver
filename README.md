@@ -108,6 +108,8 @@ Common requirements:
 **Existing node re-bootstrap** (Node object already exists), e.g. after
 hibernate/resume when the kubelet client certificate has expired:
 
+* The `Node` must **not** be Ready (`Ready!=True`). This limits auto-approval
+  to the resume window when kubelet is re-bootstrapping.
 * A `Machine` must be bound to that `Node` via `Status.NodeRef`.
 * When Machine addresses are populated, `NodeInternalDNS` must match the node
   name.
