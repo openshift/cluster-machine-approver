@@ -150,7 +150,7 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 //
 // Existing node re-bootstrap (e.g. hibernate/resume after kubelet client cert expiry):
 //  1. User is the node bootstrapper
-//  2. Node already exists
+//  2. Node already exists and is not Ready (NotReady/Unknown)
 //  3. A Machine is bound to that Node via Status.NodeRef
 //  4. When Machine addresses are populated, NodeInternalDNS matches the node name
 //  5. CSR is meant for node client auth based on usage, CN, etc
@@ -266,7 +266,8 @@ func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machin
 		return false, nil
 	}
 
-	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, &corev1.Node{}); err != nil && !apierrors.IsNotFound(err) {
+	node := &corev1.Node{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: nodeName}, node); err != nil && !apierrors.IsNotFound(err) {
 		// possible transient API error, requeue
 		klog.Errorf("%v: unable to get node %s error: %v", req.Name, nodeName, err)
 		return false, fmt.Errorf("failed get existing nodes %s", nodeName)
@@ -274,7 +275,7 @@ func authorizeNodeClientCSR(c client.Client, machines []machinehandlerpkg.Machin
 		// Node already exists. This is expected after hibernate/resume when the
 		// kubelet client certificate has expired and kubelet re-bootstraps.
 		// Approve based on Machine↔Node identity instead of the new-join time window.
-		return authorizeExistingNodeClientCSR(machines, req, nodeName)
+		return authorizeExistingNodeClientCSR(machines, req, node)
 	}
 
 	return authorizeNewNodeClientCSR(machines, req, nodeName)
@@ -314,7 +315,20 @@ func authorizeNewNodeClientCSR(machines []machinehandlerpkg.Machine, req *certif
 // Identity is verified via the Machine API: a Machine must already be bound to
 // the Node (Status.NodeRef), and when addresses are present NodeInternalDNS
 // must match the node name.
-func authorizeExistingNodeClientCSR(machines []machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, nodeName string) (bool, error) {
+//
+// As a light additional guard, the Node must not be Ready. Auto-approving
+// client certs for Ready nodes from bootstrap credentials would allow a
+// stolen bootstrap kubeconfig to impersonate another healthy node. During
+// hibernate/resume, kubelet typically re-bootstraps while NotReady; approving
+// then restores credentials before the node becomes Ready.
+func authorizeExistingNodeClientCSR(machines []machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, node *corev1.Node) (bool, error) {
+	nodeName := node.Name
+
+	if isNodeReady(node) {
+		klog.Errorf("%v: node %s already exists and is Ready, cannot auto-approve existing-node client CSR", req.Name, nodeName)
+		return false, nil
+	}
+
 	nodeMachine, err := machinehandlerpkg.FindMatchingMachineFromNodeRef(machines, nodeName)
 	if err != nil {
 		//TODO: set annotation/emit event here.
@@ -331,8 +345,18 @@ func authorizeExistingNodeClientCSR(machines []machinehandlerpkg.Machine, req *c
 		}
 	}
 
-	klog.Infof("%v: approving existing-node client CSR for %s using machine identity", req.Name, nodeName)
+	klog.Infof("%v: approving existing-node client CSR for %s using machine identity (node not Ready)", req.Name, nodeName)
 	return true, nil
+}
+
+// isNodeReady reports whether the Node has Ready=True.
+func isNodeReady(node *corev1.Node) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // authorizeServingRenewal will authorize the renewal of a kubelet's serving

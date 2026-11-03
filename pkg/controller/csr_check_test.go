@@ -257,6 +257,12 @@ func Test_authorizeCSR(t *testing.T) {
 		node.Status.DaemonEndpoints.KubeletEndpoint.Port = port
 		return node
 	}
+	withReady := func(ready corev1.ConditionStatus, node *corev1.Node) *corev1.Node {
+		node.Status.Conditions = []corev1.NodeCondition{
+			{Type: corev1.NodeReady, Status: ready},
+		}
+		return node
+	}
 
 	hostSubnet := func(name string) *networkv1.HostSubnet {
 		return &networkv1.HostSubnet{
@@ -1194,7 +1200,8 @@ func Test_authorizeCSR(t *testing.T) {
 		},
 		{
 			// OCPBUGS-84535: after hibernate/resume >24h, kubelet re-bootstraps
-			// while Node and Machine already exist. Approve via Machine identity.
+			// while Node and Machine already exist. Approve via Machine identity
+			// only while the node is not Ready.
 			name: "client good existing node with matching machine node ref",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
@@ -1211,7 +1218,7 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node: withName("panda", defaultNode()),
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
 				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "hibernate-resume",
@@ -1242,7 +1249,7 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "PANDA"}),
 				},
-				node: withName("panda", defaultNode()),
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1264,12 +1271,39 @@ func Test_authorizeCSR(t *testing.T) {
 			authorize: true,
 		},
 		{
+			name: "client good existing Ready node with matching machine node ref is denied",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "panda"}),
+				},
+				node: withReady(corev1.ConditionTrue, withName("panda", defaultNode())),
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
 			name: "client good existing node with node ref but mismatched InternalDNS",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
 					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "not-panda"}),
 				},
-				node: withName("panda", defaultNode()),
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1296,7 +1330,7 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeMachine("other", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "panda"}),
 				},
-				node: withName("panda", defaultNode()),
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
