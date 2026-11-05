@@ -87,20 +87,34 @@ CSR approval details can be found in [csr_check.go](https://github.com/openshift
 this has not been disabled, the following criteria must be met for the client
 CSR to be approved:
 
+Common requirements:
+
 * The user must be the node bootstrapper
   * The username in the CSR must be
     `system:serviceaccount:openshift-machine-config-operator:node-bootstrapper`
   * The groups in the CSR must be
     `system:serviceaccounts:openshift-machine-config-operator`,
     `system:serviceaccounts`, and `system:authenticated`.
-* A `Node` object must not yet exist for the node that created the CSR.
-* The `Machine` API is used to do a sanity check.  A `Machine` must exist with
-  a `NodeInternalDNS` address in its `Status` that matches the future name of
-  the `Node`, as found in the CSR.
+* The CSR is for node client auth.
+
+**New node join** (Node object does not yet exist):
+
+* A `Machine` must exist with a `NodeInternalDNS` address in its `Status` that
+  matches the future name of the `Node`, as found in the CSR.
 * This `Machine` must not have a `NodeRef` set.
 * The CSR creation timestamp must be close to the `Machine` creation timestamp
-  (currently within 2 hours)
-* The CSR is for node client auth.
+  (currently within 2 hours).
+
+**Existing node re-bootstrap** (Node object already exists), e.g. after
+hibernate/resume when the kubelet client certificate has expired:
+
+* The `Node` must **not** be Ready (`Ready!=True`). This limits auto-approval
+  to the resume window when kubelet is re-bootstrapping.
+* A `Machine` must be bound to that `Node` via `Status.NodeRef`.
+* When Machine addresses are populated, `NodeInternalDNS` must match the node
+  name.
+* The Machine creation time window is **not** applied; the Machine↔Node
+  association is used as the identity check instead.
 
 ### Node Server CSR Approval Workflow
 
