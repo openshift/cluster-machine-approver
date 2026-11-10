@@ -49,7 +49,7 @@ spec:
           protocol: TCP
         resources:
           requests:
-            memory: 50Mi
+            memory: 90Mi
             cpu: 10m
         volumeMounts:
         - mountPath: /var/run/configmaps/config
