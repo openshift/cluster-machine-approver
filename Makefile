@@ -2,7 +2,8 @@
 ENVTEST_K8S_VERSION = 1.26
 
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
-ENVTEST = go run ${PROJECT_DIR}/vendor/sigs.k8s.io/controller-runtime/tools/setup-envtest
+ENVTEST_VERSION = v0.0.0-20240812162837-9557f1031fe4
+ENVTEST = $(PROJECT_DIR)/bin/setup-envtest
 
 GO111MODULE = on
 export GO111MODULE
@@ -43,8 +44,13 @@ all build:
 test: unit
 .PHONY: test
 
-unit:
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path --bin-dir $(PROJECT_DIR)/bin)" ./hack/ci-test.sh
+$(ENVTEST):
+	mkdir -p $(PROJECT_DIR)/bin
+	GOBIN=$(PROJECT_DIR)/bin GOFLAGS="" go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+
+unit: $(ENVTEST)
+	assets="$$( $(ENVTEST) use $(ENVTEST_K8S_VERSION) --use-deprecated-gcs=false -p path --bin-dir $(PROJECT_DIR)/bin )" || exit $$?; \
+	KUBEBUILDER_ASSETS="$$assets" ./hack/ci-test.sh
 .PHONY: unit
 
 .PHONY: goimports
