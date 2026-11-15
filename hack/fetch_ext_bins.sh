@@ -92,14 +92,15 @@ function fetch_tools {
   fi
 
   header_text "fetching tools"
-  kb_tools_archive_name="kubebuilder-tools-$k8s_version-$goos-$goarch.tar.gz"
-  kb_tools_download_url="https://storage.googleapis.com/kubebuilder-tools/$kb_tools_archive_name"
+  kb_tools_archive_name="envtest-v$k8s_version-$goos-$goarch.tar.gz"
+  kb_tools_download_url="https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v$k8s_version/$kb_tools_archive_name"
 
   kb_tools_archive_path="$tmp_root/$kb_tools_archive_name"
   if [ ! -f $kb_tools_archive_path ]; then
-    curl -fsL ${kb_tools_download_url} -o "$kb_tools_archive_path"
+    curl -fsL "${kb_tools_download_url}" -o "$kb_tools_archive_path" || return
   fi
-  tar -zvxf "$kb_tools_archive_path" -C "$tmp_root/"
+  mkdir -p "$kb_root_dir/bin" || return
+  tar -zvxf "$kb_tools_archive_path" -C "$kb_root_dir/bin" --strip-components=2
 }
 
 function setup_envs {
