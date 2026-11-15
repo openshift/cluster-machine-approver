@@ -1,8 +1,10 @@
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.26
+ENVTEST_K8S_VERSION = 1.26.1
 
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
-ENVTEST = go run ${PROJECT_DIR}/vendor/sigs.k8s.io/controller-runtime/tools/setup-envtest
+ENVTEST_PLATFORM := $(shell go env GOOS)-$(shell go env GOARCH)
+ENVTEST_ASSETS := $(PROJECT_DIR)/bin/k8s/$(ENVTEST_K8S_VERSION)-$(ENVTEST_PLATFORM)
+ENVTEST_URL := https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v$(ENVTEST_K8S_VERSION)/envtest-v$(ENVTEST_K8S_VERSION)-$(ENVTEST_PLATFORM).tar.gz
 
 GO111MODULE = on
 export GO111MODULE
@@ -43,8 +45,16 @@ all build:
 test: unit
 .PHONY: test
 
-unit:
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path --bin-dir $(PROJECT_DIR)/bin)" ./hack/ci-test.sh
+$(ENVTEST_ASSETS)/.ready:
+	mkdir -p "$(ENVTEST_ASSETS)"
+	curl --fail --location --retry 3 "$(ENVTEST_URL)" -o "$(ENVTEST_ASSETS)/assets.tar.gz"
+	tar -xzf "$(ENVTEST_ASSETS)/assets.tar.gz" -C "$(ENVTEST_ASSETS)" --strip-components=2
+	test -x "$(ENVTEST_ASSETS)/kube-apiserver" -a -x "$(ENVTEST_ASSETS)/etcd" -a -x "$(ENVTEST_ASSETS)/kubectl"
+	rm "$(ENVTEST_ASSETS)/assets.tar.gz"
+	touch "$@"
+
+unit: $(ENVTEST_ASSETS)/.ready
+	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" ./hack/ci-test.sh
 .PHONY: unit
 
 .PHONY: goimports
