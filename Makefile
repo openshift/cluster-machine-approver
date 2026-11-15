@@ -3,7 +3,7 @@ ENVTEST_K8S_VERSION = 1.26.1
 
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 ENVTEST_PLATFORM := $(shell go env GOOS)-$(shell go env GOARCH)
-ENVTEST_ASSETS := $(PROJECT_DIR)/bin/k8s/$(ENVTEST_K8S_VERSION)-$(ENVTEST_PLATFORM)
+ENVTEST_ASSETS := $(PROJECT_DIR)/bin/envtest/$(ENVTEST_K8S_VERSION)-$(ENVTEST_PLATFORM)
 ENVTEST_URL := https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v$(ENVTEST_K8S_VERSION)/envtest-v$(ENVTEST_K8S_VERSION)-$(ENVTEST_PLATFORM).tar.gz
 
 GO111MODULE = on
