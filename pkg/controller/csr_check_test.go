@@ -1581,7 +1581,7 @@ func TestAuthorizeServingRenewal(t *testing.T) {
 			currentCert: parseCert(t, serverCertGood),
 			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
 			time:        presetTimeExpired,
-			wantErr:     fmt.Sprintf("x509: certificate has expired or is not yet valid: current time %s is before %s", presetTimeExpired.Format(time.RFC3339), presetTimeCorrect.Format(time.RFC3339)),
+			wantErr:     fmt.Sprintf("x509: certificate has expired or is not yet valid: current time %s is before %s", presetTimeExpired.Format(time.RFC3339), parseCert(t, serverCertGood).NotBefore.Format(time.RFC3339)),
 		},
 		{
 			name:        "SAN list differs",
@@ -1679,7 +1679,7 @@ func TestAuthorizeServingRenewalWithEgressIPs(t *testing.T) {
 			currentCert: parseCert(t, serverCertGood),
 			ca:          []*x509.Certificate{parseCert(t, rootCertGood)},
 			time:        presetTimeExpired,
-			wantErr:     fmt.Sprintf("x509: certificate has expired or is not yet valid: current time %s is before %s", presetTimeExpired.Format(time.RFC3339), presetTimeCorrect.Format(time.RFC3339)),
+			wantErr:     fmt.Sprintf("x509: certificate has expired or is not yet valid: current time %s is before %s", presetTimeExpired.Format(time.RFC3339), parseCert(t, serverCertGood).NotBefore.Format(time.RFC3339)),
 		},
 		{
 			name:        "With additional unknown IP address",
