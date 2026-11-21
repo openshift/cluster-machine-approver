@@ -140,3 +140,29 @@ This section serves as a summary of those requirements.
   `NodeHostName`, `NodeInternalIP`, and `NodeExternalIP` addresses as those
   listed on the `Node` resource.  All of these addresses are placed in the CSR
   and are validated against the addresses on the `Machine` object.
+
+## Metrics serving
+
+The HTTPS metrics endpoint listens on `0.0.0.0:9192` by default. Without
+additional flags, its controller-runtime authentication and authorization
+filter uses the cluster API server (TokenReview and SubjectAccessReview).
+
+For hosted control planes, configure local client-certificate authorization:
+
+```text
+--metrics-cert-file=/var/run/secrets/metrics-serving/tls.crt
+--metrics-key-file=/var/run/secrets/metrics-serving/tls.key
+--metrics-client-ca-file=/var/run/secrets/metrics-client-ca/ca.crt
+--metrics-allowed-client-cn=system:serviceaccount:hypershift:prometheus
+```
+
+All four flags are required for this mode. The serving certificate and key
+must exist and parse at startup; the endpoint does not fall back to a
+self-signed `localhost` certificate. The client CA must contain valid PEM
+certificates. TLS requires a verified client certificate, and the metrics
+handler allows only a certificate whose subject CN matches the configured
+value. Scrapes in this mode do not perform API-server authentication or
+authorization. The serving certificate is reloaded when its files change.
+Mount only the client CA in the approver, not the scraper's private key.
+Enable these flags in HyperShift only after the release-payload machine
+approver image supports them.

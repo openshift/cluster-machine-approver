@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	goflag "flag"
 	"fmt"
 	"os"
@@ -45,8 +44,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 const (
@@ -71,6 +68,10 @@ func main() {
 	var leaderElectResourceName string
 	var leaderElectResourceNamespace string
 	var metricsBindAddress string
+	var metricsClientCAFile string
+	var metricsAllowedClientCN string
+	var metricsCertFile string
+	var metricsKeyFile string
 	var tlsMinVersionFlag string
 	var tlsCipherSuitesFlag []string
 	var tlsCurvePreferencesFlag []int32
@@ -98,6 +99,10 @@ func main() {
 	flagSet.StringVar(&leaderElectResourceName, "leader-elect-resource-name", "cluster-machine-approver-leader", "the name of the resource that leader election will use for holding the leader lock.")
 	flagSet.StringVar(&leaderElectResourceNamespace, "leader-elect-resource-namespace", "openshift-cluster-machine-approver", "the namespace in which the leader election resource will be created.")
 	flagSet.StringVar(&metricsBindAddress, "metrics-bind-address", metrics.DefaultMetricsBindAddress, "the address the metrics endpoint binds to.")
+	flagSet.StringVar(&metricsClientCAFile, "metrics-client-ca-file", "", "PEM CA bundle used to verify metrics client certificates; requires --metrics-allowed-client-cn and serving certificate flags.")
+	flagSet.StringVar(&metricsAllowedClientCN, "metrics-allowed-client-cn", "", "Only this verified client certificate subject CN may scrape metrics.")
+	flagSet.StringVar(&metricsCertFile, "metrics-cert-file", "", "Metrics serving certificate file; must be used with --metrics-key-file.")
+	flagSet.StringVar(&metricsKeyFile, "metrics-key-file", "", "Metrics serving private key file; must be used with --metrics-cert-file.")
 	flagSet.StringVar(&tlsMinVersionFlag, "tls-min-version", "", "Minimum TLS version supported. When set, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSPossibleVersions(), ", "))
 	flagSet.StringSliceVar(&tlsCipherSuitesFlag, "tls-cipher-suites", nil, "Comma-separated list of cipher suites for the server. When set, overrides the cluster-wide TLS profile. Possible values: "+strings.Join(cliflag.TLSCipherPossibleValues(), ", "))
 	flagSet.Int32SliceVar(&tlsCurvePreferencesFlag, "tls-curve-preferences", nil, "Comma-separated list of TLS curve preferences (as numeric Go crypto/tls CurveID values) for the server. When set, overrides the cluster-wide TLS profile. See https://pkg.go.dev/crypto/tls#CurveID for supported values.")
@@ -168,15 +173,15 @@ func main() {
 		klog.Fatalf("unable to configure TLS: %v", err)
 	}
 
+	metricsOptions, err := metrics.ServingOptions(ctx, metricsBindAddress, metricsClientCAFile, metricsAllowedClientCN, metricsCertFile, metricsKeyFile, tlsResult.TLSConfig)
+	if err != nil {
+		klog.Fatalf("unable to configure metrics: %v", err)
+	}
+
 	// Create a new Cmd to provide shared dependencies and start components
 	klog.Info("setting up manager")
 	mgr, err := manager.New(workloadConfig, manager.Options{
-		Metrics: server.Options{
-			BindAddress:    metricsBindAddress,
-			SecureServing:  true,
-			FilterProvider: filters.WithAuthenticationAndAuthorization,
-			TLSOpts:        []func(*tls.Config){tlsResult.TLSConfig},
-		},
+		Metrics:                       metricsOptions,
 		LeaderElectionNamespace:       leaderElectResourceNamespace,
 		LeaderElection:                leaderElect,
 		LeaseDuration:                 &leaderElectLeaseDuration,
