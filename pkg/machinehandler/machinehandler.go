@@ -179,3 +179,51 @@ func FindMatchingMachineFromNodeRef(machines []Machine, nodeName string) (*Machi
 	}
 	return nil, fmt.Errorf("matching machine not found")
 }
+
+// FindUniqueMachineFromNodeRef finds the single Machine bound to the given Node
+// via Status.NodeRef.
+//
+// Unlike FindMatchingMachineFromNodeRef, which returns the first Machine whose
+// NodeRef name matches, this requires the binding to be unambiguous and current:
+//
+//   - more than one Machine referencing the same node name is an error, and
+//   - a NodeRef UID that does not match the Node's current UID is an error.
+//
+// Together these stop a Machine whose NodeRef points at a deleted Node that
+// happened to have the same name, or a duplicated binding, from being treated
+// as proof that this Machine and this Node belong together. NodeRef.UID is only
+// compared when both sides have it set, because not every Machine controller
+// populates it.
+//
+// This is deliberately a separate function rather than a tightening of
+// FindMatchingMachineFromNodeRef: that one decides whether a serving CSR takes
+// the machine-based or the serving-cert-renewal path, and making it stricter
+// would silently move clusters between those paths.
+func FindUniqueMachineFromNodeRef(machines []Machine, node *corev1.Node) (*Machine, error) {
+	var found *Machine
+
+	for i := range machines {
+		ref := machines[i].Status.NodeRef
+		if ref == nil || ref.Name != node.Name {
+			continue
+		}
+
+		if ref.UID != "" && node.UID != "" && ref.UID != node.UID {
+			return nil, fmt.Errorf("machine %q has a stale NodeRef for node %q: references UID %q, but the node's UID is %q",
+				machines[i].Name, node.Name, ref.UID, node.UID)
+		}
+
+		if found != nil {
+			return nil, fmt.Errorf("more than one machine (%q, %q) is bound to node %q via NodeRef",
+				found.Name, machines[i].Name, node.Name)
+		}
+
+		found = &machines[i]
+	}
+
+	if found == nil {
+		return nil, fmt.Errorf("matching machine not found")
+	}
+
+	return found, nil
+}

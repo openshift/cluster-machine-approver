@@ -108,13 +108,29 @@ Common requirements:
 **Existing node re-bootstrap** (Node object already exists), e.g. after
 hibernate/resume when the kubelet client certificate has expired:
 
-* The `Node` must **not** be Ready (`Ready!=True`). This limits auto-approval
-  to the resume window when kubelet is re-bootstrapping.
-* A `Machine` must be bound to that `Node` via `Status.NodeRef`.
+* Exactly one `Machine` must be bound to that `Node` via `Status.NodeRef`. If
+  more than one `Machine` references the node, the CSR is left pending.
+* If the `NodeRef` records a UID, it must match the `Node`'s current UID, so
+  that a binding left over from a deleted node of the same name is not mistaken
+  for the current one. Not every Machine controller records a UID, so an empty
+  `NodeRef` UID is accepted.
 * When Machine addresses are populated, `NodeInternalDNS` must match the node
   name.
+* The `Node` must **not** be Ready (`Ready!=True`). This limits auto-approval
+  to the resume window when kubelet is re-bootstrapping.
 * The Machine creation time window is **not** applied; the Machine↔Node
-  association is used as the identity check instead.
+  association is used in its place.
+
+Readiness is checked last. A CSR that satisfies everything above but names a
+node that is still Ready is re-evaluated periodically for a short while, since
+the node monitor may not have noticed the node going away yet. It is never
+approved while the node reports Ready, and a CSR that fails any of the earlier
+checks is not retried at all.
+
+Note that, as for a new node join, the requester is the shared node-bootstrapper
+credential, which is not bound to any particular node. The checks above
+establish that the named node exists, is not currently running, and belongs to
+exactly one machine — they do not prove that the CSR came from that node.
 
 ### Node Server CSR Approval Workflow
 

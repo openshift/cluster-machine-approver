@@ -79,6 +79,19 @@ func newCSRValidationError(format string, args ...interface{}) *CSRValidationErr
 	return &CSRValidationError{msg: fmt.Sprintf(format, args...)}
 }
 
+// nodeNotSettledError represents a CSR that is not approvable right now, but
+// may become approvable once the Node's observed state catches up. It is
+// neither a validation failure nor an infrastructure error: the controller
+// should look at the CSR again shortly rather than logging an error, because
+// nothing else will bring it back. See reconcileCSR for the retry bound.
+type nodeNotSettledError struct {
+	nodeName string
+}
+
+func (e *nodeNotSettledError) Error() string {
+	return fmt.Sprintf("node %s has not settled into a state where this CSR can be evaluated", e.nodeName)
+}
+
 // getNodeEgressIPs returns the egress IPs assigned to the given node.
 // It determines the network type and queries the appropriate CRD:
 // - OVNKubernetes: queries EgressIP objects from k8s.ovn.org/v1
@@ -225,10 +238,16 @@ func validateCSRContents(req *certificatesv1.CertificateSigningRequest, csr *x50
 // Existing node re-bootstrap (e.g. hibernate/resume after kubelet client cert expiry):
 //  1. User is the node bootstrapper
 //  2. Node already exists and is not Ready (NotReady/Unknown)
-//  3. A Machine is bound to that Node via Status.NodeRef
+//  3. Exactly one Machine is bound to that Node via Status.NodeRef, and where
+//     the NodeRef records a UID it is the Node's current UID
 //  4. When Machine addresses are populated, NodeInternalDNS matches the node name
 //  5. CSR is meant for node client auth based on usage, CN, etc
 //     (no Machine creation time window — the node/machine association is the identity check)
+//
+// As with a new node join, the requester is the shared node-bootstrapper
+// credential and is not bound to a specific node, so these checks establish
+// that the named node exists, is not running, and belongs to exactly one
+// machine; they do not prove the CSR came from that node.
 //
 // For server certificates:
 // Names contained in the CSR are checked against addresses in the corresponding node's machine status.
@@ -368,27 +387,32 @@ func authorizeNewNodeClientCSR(machines []machinehandlerpkg.Machine, req *certif
 // the Node already exists. This covers kubelet re-bootstrap after long
 // hibernation (>24h) where the initial join time window no longer applies.
 //
-// Identity is verified via the Machine API: a Machine must already be bound to
-// the Node (Status.NodeRef), and when addresses are present NodeInternalDNS
-// must match the node name.
+// The Machine API is used to corroborate the request: exactly one Machine must
+// be bound to the Node via Status.NodeRef, where the NodeRef records a UID it
+// must be this Node's UID so that a binding left over from a deleted Node of
+// the same name cannot stand in for the real one, and when addresses are
+// present NodeInternalDNS must match the node name.
 //
-// As a light additional guard, the Node must not be Ready. Auto-approving
-// client certs for Ready nodes from bootstrap credentials would allow a
-// stolen bootstrap kubeconfig to impersonate another healthy node. During
-// hibernate/resume, kubelet typically re-bootstraps while NotReady; approving
-// then restores credentials before the node becomes Ready.
+// As with a new node join, the requester is the shared node-bootstrapper
+// credential, so none of this proves the CSR came from the node it names. It
+// establishes that the node exists, belongs to exactly one machine, and is not
+// currently running.
+//
+// The Node must also not be Ready. Auto-approving client certs for Ready nodes
+// from bootstrap credentials would allow a stolen bootstrap kubeconfig to
+// impersonate another healthy node. During hibernate/resume, kubelet
+// re-bootstraps while NotReady; approving then restores credentials before the
+// node becomes Ready.
+//
+// Readiness is checked last, so that only a request that is otherwise
+// approvable is ever deferred and retried.
 func authorizeExistingNodeClientCSR(machines []machinehandlerpkg.Machine, req *certificatesv1.CertificateSigningRequest, node *corev1.Node) (bool, error) {
 	nodeName := node.Name
 
-	if isNodeReady(node) {
-		klog.Errorf("%v: node %s already exists and is Ready, cannot auto-approve existing-node client CSR", req.Name, nodeName)
-		return false, nil
-	}
-
-	nodeMachine, err := machinehandlerpkg.FindMatchingMachineFromNodeRef(machines, nodeName)
+	nodeMachine, err := machinehandlerpkg.FindUniqueMachineFromNodeRef(machines, node)
 	if err != nil {
 		//TODO: set annotation/emit event here.
-		klog.Errorf("%v: node %s already exists and no machine is bound to it via NodeRef, cannot approve", req.Name, nodeName)
+		klog.Errorf("%v: node %s already exists but has no unambiguous, current machine binding, cannot approve: %v", req.Name, nodeName, err)
 		return false, nil
 	}
 
@@ -401,7 +425,19 @@ func authorizeExistingNodeClientCSR(machines []machinehandlerpkg.Machine, req *c
 		}
 	}
 
-	klog.Infof("%v: approving existing-node client CSR for %s using machine identity (node not Ready)", req.Name, nodeName)
+	if isNodeReady(node) {
+		// kubelet only falls back to the bootstrap credential once it has no
+		// usable client certificate, at which point it can no longer renew its
+		// own lease, so a genuinely re-bootstrapping node drops out of Ready
+		// within the node monitor grace period. Ready=True here is therefore
+		// either that brief race or a request we should never approve. Ask to be
+		// retried rather than approving now or abandoning the CSR, since a real
+		// kubelet waits on this CSR and has no way to prompt another look.
+		klog.Infof("%v: node %s still reports Ready, deferring existing-node client CSR", req.Name, nodeName)
+		return false, &nodeNotSettledError{nodeName: nodeName}
+	}
+
+	klog.Infof("%v: approving existing-node client CSR for %s, machine %s is bound to it and the node is not Ready", req.Name, nodeName, nodeMachine.Name)
 	return true, nil
 }
 
