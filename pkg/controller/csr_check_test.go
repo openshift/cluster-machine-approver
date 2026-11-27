@@ -39,6 +39,7 @@ import (
 
 // The following global test variables are populated within the init func
 var serverCertGood, serverKeyGood, rootCertGood string
+var pandaServerCertGood, pandaServerKeyGood string
 
 // Generated CRs, are populating within the init func
 var goodCSR, goodCSRECDSA, extraAddr, otherName, noNamePrefix, noGroup, clientGood, clientExtraO, clientWithDNS, clientWrongCN, clientEmptyName, emptyCSR, multusCSRPEM string
@@ -101,12 +102,20 @@ func init() {
 		panic(err)
 	}
 
+	// Serving cert for the "panda" node used by existing-node client CSR tests.
+	pandaServerCert, pandaServerKey, err := generateCertKeyPair(time.Hour, rootCert, rootKey, "system:node:panda", "panda")
+	if err != nil {
+		panic(err)
+	}
+
 	presetTimeCorrect = time.Now().UTC()
 	presetTimeExpired = time.Now().UTC().Add(-24 * time.Hour)
 
 	rootCertGood = string(rootCert)
 	serverCertGood = string(serverCert)
 	serverKeyGood = string(serverKey)
+	pandaServerCertGood = string(pandaServerCert)
+	pandaServerKeyGood = string(pandaServerKey)
 
 	defaultOrgs = []string{"system:nodes"}
 	defaultIPs = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")}
@@ -322,6 +331,14 @@ func Test_authorizeCSR(t *testing.T) {
 	}
 	internalDNS := func(address string) corev1.NodeAddress {
 		return corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: address}
+	}
+
+	// pandaPort hosts a kubelet presenting system:node:panda for existing-node
+	// client CSR serving-cert proof. Distinct from defaultPort (system:node:test).
+	pandaPort := defaultPort + 17
+	rootCA := []*x509.Certificate{parseCert(t, rootCertGood)}
+	withPandaProof := func(node *corev1.Node) *corev1.Node {
+		return withPort(pandaPort, node)
 	}
 
 	var makeMachine = func(nodeName string, addresses ...corev1.NodeAddress) machinehandlerpkg.Machine {
@@ -1250,8 +1267,8 @@ func Test_authorizeCSR(t *testing.T) {
 		},
 		{
 			// OCPBUGS-84535: after hibernate/resume >24h, kubelet re-bootstraps
-			// while Node and Machine already exist. Approve via Machine identity
-			// only while the node is not Ready.
+			// while Node and Machine already exist. Approve with Machine binding
+			// + serving-cert proof while the node is not Ready.
 			name: "client good existing node with matching machine node ref",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
@@ -1268,7 +1285,8 @@ func Test_authorizeCSR(t *testing.T) {
 						},
 					},
 				},
-				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				node: withPandaProof(withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
 				req: &certificatesv1.CertificateSigningRequest{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "hibernate-resume",
@@ -1299,7 +1317,8 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "PANDA"}),
 				},
-				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				node: withPandaProof(withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
 				req: &certificatesv1.CertificateSigningRequest{
 					Spec: certificatesv1.CertificateSigningRequestSpec{
 						Usages: []certificatesv1.KeyUsage{
@@ -1331,7 +1350,8 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
 				},
-				node: withReady(corev1.ConditionTrue, withName("panda", defaultNode())),
+				node: withPandaProof(withReady(corev1.ConditionTrue, withName("panda", defaultNode()))),
+				ca:   rootCA,
 				req:  bootstrapperClientReq("ready-node"),
 				csr:  clientGood,
 			},
@@ -1380,7 +1400,8 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
 				},
-				node: withReady(corev1.ConditionUnknown, withName("panda", defaultNode())),
+				node: withPandaProof(withReady(corev1.ConditionUnknown, withName("panda", defaultNode()))),
+				ca:   rootCA,
 				req:  bootstrapperClientReq("ready-unknown"),
 				csr:  clientGood,
 			},
@@ -1395,9 +1416,10 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
 				},
-				node: withConditions([]corev1.NodeCondition{
+				node: withPandaProof(withConditions([]corev1.NodeCondition{
 					{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionFalse},
-				}, withName("panda", defaultNode())),
+				}, withName("panda", defaultNode()))),
+				ca:  rootCA,
 				req: bootstrapperClientReq("no-ready-condition"),
 				csr: clientGood,
 			},
@@ -1412,8 +1434,9 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeBoundMachine("machine-panda", "panda", "panda-uid-1", internalDNS("panda")),
 				},
-				node: withUID("panda-uid-1",
-					withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				node: withPandaProof(withUID("panda-uid-1",
+					withReady(corev1.ConditionFalse, withName("panda", defaultNode())))),
+				ca:  rootCA,
 				req: bootstrapperClientReq("uid-match"),
 				csr: clientGood,
 			},
@@ -1445,8 +1468,9 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
 				},
-				node: withUID("panda-uid-1",
-					withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				node: withPandaProof(withUID("panda-uid-1",
+					withReady(corev1.ConditionFalse, withName("panda", defaultNode())))),
+				ca:  rootCA,
 				req: bootstrapperClientReq("no-noderef-uid"),
 				csr: clientGood,
 			},
@@ -1477,7 +1501,8 @@ func Test_authorizeCSR(t *testing.T) {
 				machines: []machinehandlerpkg.Machine{
 					makeBoundMachine("machine-panda", "panda", ""),
 				},
-				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				node: withPandaProof(withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
 				req:  bootstrapperClientReq("no-addresses"),
 				csr:  clientGood,
 			},
@@ -1553,6 +1578,40 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: clientGood,
 			},
 			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// Serving cert is unreachable: defer and retry rather than approve
+			// without node-specific proof.
+			name: "client good existing node without serving-cert proof is deferred",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				// defaultPort has no listener for this case: shared test server
+				// is for system:node:test, and we point at an unused port.
+				node: withPort(defaultPort+99, withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
+				req:  bootstrapperClientReq("missing-proof"),
+				csr:  clientGood,
+			},
+			wantErr:   "node panda has not settled into a state where this CSR can be evaluated",
+			authorize: false,
+		},
+		{
+			// Kubelet presents a serving cert for a different node name: reject.
+			name: "client good existing node with wrong serving-cert identity is rejected",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				// defaultPort serves system:node:test, not panda.
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				ca:   rootCA,
+				req:  bootstrapperClientReq("wrong-serving-cn"),
+				csr:  clientGood,
+			},
+			wantErr:   "node serving certificate common name \"system:node:test\" does not match requested node identity \"system:node:panda\"",
 			authorize: false,
 		},
 		{
@@ -2098,6 +2157,10 @@ func Test_authorizeCSR(t *testing.T) {
 	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
 	go respond(t.Context(), server)
 	defer server.Close()
+
+	pandaServer := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, pandaPort), pandaServerCertGood, pandaServerKeyGood)
+	go respond(t.Context(), pandaServer)
+	defer pandaServer.Close()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

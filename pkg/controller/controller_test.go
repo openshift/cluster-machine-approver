@@ -1,13 +1,17 @@
 package controller
 
 import (
+	"context"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -22,6 +26,11 @@ import (
 // event. Without the requeue below, a kubelet that re-bootstrapped inside the
 // node monitor grace period would wait on a CSR that is never looked at again.
 func Test_reconcileCSR_nodeNotSettled(t *testing.T) {
+	const (
+		nodeAddr = "127.0.0.1"
+		nodePort = int32(25452)
+	)
+
 	// A node-bootstrapper client CSR for node "panda", matching clientGood's CN.
 	csrFor := func(age time.Duration) certificatesv1.CertificateSigningRequest {
 		return certificatesv1.CertificateSigningRequest{
@@ -50,9 +59,35 @@ func Test_reconcileCSR_nodeNotSettled(t *testing.T) {
 		return &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{Name: "panda", UID: "panda-uid"},
 			Status: corev1.NodeStatus{
+				Addresses: []corev1.NodeAddress{
+					{Type: corev1.NodeInternalIP, Address: nodeAddr},
+				},
+				DaemonEndpoints: corev1.NodeDaemonEndpoints{
+					KubeletEndpoint: corev1.DaemonEndpoint{Port: nodePort},
+				},
 				Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}},
 			},
 		}
+	}
+
+	kubeletCA := func() *corev1.ConfigMap {
+		cert := parseCert(t, rootCertGood)
+		return &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: configNamespace,
+				Name:      kubeletCAConfigMap,
+			},
+			Data: map[string]string{
+				"ca-bundle.crt": string(pem.EncodeToMemory(&pem.Block{
+					Type:  "CERTIFICATE",
+					Bytes: cert.Raw,
+				})),
+			},
+		}
+	}
+
+	objectsFor := func(ready corev1.ConditionStatus) []runtime.Object {
+		return []runtime.Object{nodeWithReady(ready), kubeletCA()}
 	}
 
 	machines := []machinehandlerpkg.Machine{
@@ -66,6 +101,10 @@ func Test_reconcileCSR_nodeNotSettled(t *testing.T) {
 			},
 		},
 	}
+
+	pandaServer := fakeResponder(t, fmt.Sprintf("%s:%v", nodeAddr, nodePort), pandaServerCertGood, pandaServerKeyGood)
+	go respond(context.Background(), pandaServer)
+	defer pandaServer.Close()
 
 	tests := []struct {
 		name       string
@@ -95,7 +134,7 @@ func Test_reconcileCSR_nodeNotSettled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &CertificateApprover{
-				WorkloadClient: fake.NewFakeClient(nodeWithReady(corev1.ConditionTrue)),
+				WorkloadClient: fake.NewFakeClient(objectsFor(corev1.ConditionTrue)...),
 			}
 
 			result, err := m.reconcileCSR(t.Context(), csrFor(tt.csrAge), machines)
@@ -118,7 +157,7 @@ func Test_reconcileCSR_nodeNotSettled(t *testing.T) {
 			t.Fatalf("parseCSR() unexpected error: %v", err)
 		}
 
-		readyClient := fake.NewFakeClient(nodeWithReady(corev1.ConditionTrue))
+		readyClient := fake.NewFakeClient(objectsFor(corev1.ConditionTrue)...)
 		authorize, err := authorizeCSR(t.Context(), readyClient, ClusterMachineApproverConfig{}, machines, &csr, parsedCSR)
 		if authorize {
 			t.Error("authorizeCSR() authorized while the node was still Ready, want deferred")
@@ -129,7 +168,7 @@ func Test_reconcileCSR_nodeNotSettled(t *testing.T) {
 		}
 
 		// The node monitor marks the unreachable node's readiness Unknown.
-		notReadyClient := fake.NewFakeClient(nodeWithReady(corev1.ConditionUnknown))
+		notReadyClient := fake.NewFakeClient(objectsFor(corev1.ConditionUnknown)...)
 		authorize, err = authorizeCSR(t.Context(), notReadyClient, ClusterMachineApproverConfig{}, machines, &csr, parsedCSR)
 		if err != nil {
 			t.Fatalf("authorizeCSR() unexpected error after readiness transition: %v", err)

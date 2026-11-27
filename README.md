@@ -116,21 +116,23 @@ hibernate/resume when the kubelet client certificate has expired:
   `NodeRef` UID is accepted.
 * When Machine addresses are populated, `NodeInternalDNS` must match the node
   name.
+* **Node serving-certificate proof:** the approver dials the kubelet at the
+  Node's address (same path as serving-cert renewal), retrieves the current
+  serving certificate, and requires its CommonName to be
+  `system:node:<nodeName>` matching the client CSR. If the serving cert cannot
+  be retrieved or verified yet, the CSR is re-evaluated periodically. A serving
+  cert for the wrong node is rejected.
 * The `Node` must **not** be Ready (`Ready!=True`). This limits auto-approval
   to the resume window when kubelet is re-bootstrapping.
-* The Machine creation time window is **not** applied; the Machine↔Node
-  association is used in its place.
+* The Machine creation time window is **not** applied.
 
-Readiness is checked last. A CSR that satisfies everything above but names a
-node that is still Ready is re-evaluated periodically for a short while, since
-the node monitor may not have noticed the node going away yet. It is never
-approved while the node reports Ready, and a CSR that fails any of the earlier
-checks is not retried at all.
+Checks run in the order above. Readiness is last: a CSR that is otherwise
+approvable but names a Ready node is re-evaluated periodically for a short
+while. CSRs that fail an earlier check (binding, DNS, or serving-cert identity)
+are not retried.
 
-Note that, as for a new node join, the requester is the shared node-bootstrapper
-credential, which is not bound to any particular node. The checks above
-establish that the named node exists, is not currently running, and belongs to
-exactly one machine — they do not prove that the CSR came from that node.
+The requester is the shared node-bootstrapper service account. Machine binding
+plus kubelet serving-cert proof are what bind the request to a specific node.
 
 ### Node Server CSR Approval Workflow
 
