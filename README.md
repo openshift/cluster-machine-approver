@@ -87,20 +87,52 @@ CSR approval details can be found in [csr_check.go](https://github.com/openshift
 this has not been disabled, the following criteria must be met for the client
 CSR to be approved:
 
+Common requirements:
+
 * The user must be the node bootstrapper
   * The username in the CSR must be
     `system:serviceaccount:openshift-machine-config-operator:node-bootstrapper`
   * The groups in the CSR must be
     `system:serviceaccounts:openshift-machine-config-operator`,
     `system:serviceaccounts`, and `system:authenticated`.
-* A `Node` object must not yet exist for the node that created the CSR.
-* The `Machine` API is used to do a sanity check.  A `Machine` must exist with
-  a `NodeInternalDNS` address in its `Status` that matches the future name of
-  the `Node`, as found in the CSR.
+* The CSR is for node client auth.
+
+**New node join** (Node object does not yet exist):
+
+* A `Machine` must exist with a `NodeInternalDNS` address in its `Status` that
+  matches the future name of the `Node`, as found in the CSR.
 * This `Machine` must not have a `NodeRef` set.
 * The CSR creation timestamp must be close to the `Machine` creation timestamp
-  (currently within 2 hours)
-* The CSR is for node client auth.
+  (currently within 2 hours).
+
+**Existing node re-bootstrap** (Node object already exists), e.g. after
+hibernate/resume when the kubelet client certificate has expired:
+
+* Exactly one `Machine` must be bound to that `Node` via `Status.NodeRef`. If
+  more than one `Machine` references the node, the CSR is left pending.
+* If the `NodeRef` records a UID, it must match the `Node`'s current UID, so
+  that a binding left over from a deleted node of the same name is not mistaken
+  for the current one. Not every Machine controller records a UID, so an empty
+  `NodeRef` UID is accepted.
+* When Machine addresses are populated, `NodeInternalDNS` must match the node
+  name.
+* **Node serving-certificate proof:** the approver dials the kubelet at the
+  Node's address (same path as serving-cert renewal), retrieves the current
+  serving certificate, and requires its CommonName to be
+  `system:node:<nodeName>` matching the client CSR. If the serving cert cannot
+  be retrieved or verified yet, the CSR is re-evaluated periodically. A serving
+  cert for the wrong node is rejected.
+* The `Node` must **not** be Ready (`Ready!=True`). This limits auto-approval
+  to the resume window when kubelet is re-bootstrapping.
+* The Machine creation time window is **not** applied.
+
+Checks run in the order above. Readiness is last: a CSR that is otherwise
+approvable but names a Ready node is re-evaluated periodically for a short
+while. CSRs that fail an earlier check (binding, DNS, or serving-cert identity)
+are not retried.
+
+The requester is the shared node-bootstrapper service account. Machine binding
+plus kubelet serving-cert proof are what bind the request to a specific node.
 
 ### Node Server CSR Approval Workflow
 

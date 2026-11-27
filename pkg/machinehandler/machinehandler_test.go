@@ -8,8 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -189,6 +192,121 @@ func Test_authorizeCSR(t *testing.T) {
 					t.Errorf("unexpected machines returned. want machine names: %v, got machines: %v.", tt.wantMachineNames, machines)
 					break
 				}
+			}
+		})
+	}
+}
+
+func Test_FindUniqueMachineFromNodeRef(t *testing.T) {
+	node := func(name string, uid types.UID) *corev1.Node {
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid}}
+	}
+	machine := func(machineName, nodeName string, nodeRefUID types.UID) Machine {
+		m := Machine{ObjectMeta: metav1.ObjectMeta{Name: machineName}}
+		if nodeName != "" {
+			m.Status.NodeRef = &corev1.ObjectReference{Name: nodeName, UID: nodeRefUID}
+		}
+		return m
+	}
+
+	tests := []struct {
+		name        string
+		machines    []Machine
+		node        *corev1.Node
+		wantMachine string
+		wantErr     string
+	}{
+		{
+			name:        "single machine bound by name, no UIDs anywhere",
+			machines:    []Machine{machine("m1", "node1", "")},
+			node:        node("node1", ""),
+			wantMachine: "m1",
+		},
+		{
+			name:        "single machine bound by name with matching UID",
+			machines:    []Machine{machine("m1", "node1", "uid-1")},
+			node:        node("node1", "uid-1"),
+			wantMachine: "m1",
+		},
+		{
+			// Machine controllers that do not record a UID in the NodeRef must
+			// still be able to bind.
+			name:        "NodeRef has no UID but node does",
+			machines:    []Machine{machine("m1", "node1", "")},
+			node:        node("node1", "uid-1"),
+			wantMachine: "m1",
+		},
+		{
+			name:        "node has no UID but NodeRef does",
+			machines:    []Machine{machine("m1", "node1", "uid-1")},
+			node:        node("node1", ""),
+			wantMachine: "m1",
+		},
+		{
+			// The node was deleted and recreated under the same name.
+			name:     "NodeRef UID does not match the node's UID",
+			machines: []Machine{machine("m1", "node1", "uid-old")},
+			node:     node("node1", "uid-new"),
+			wantErr:  `machine "m1" has a stale NodeRef for node "node1": references UID "uid-old", but the node's UID is "uid-new"`,
+		},
+		{
+			name:     "two machines bound to the same node",
+			machines: []Machine{machine("m1", "node1", ""), machine("m2", "node1", "")},
+			node:     node("node1", ""),
+			wantErr:  `more than one machine ("m1", "m2") is bound to node "node1" via NodeRef`,
+		},
+		{
+			// A stale binding alongside a current one is still ambiguous
+			// evidence, so nothing is returned.
+			name:     "a stale binding alongside a current one",
+			machines: []Machine{machine("m1", "node1", "uid-old"), machine("m2", "node1", "uid-new")},
+			node:     node("node1", "uid-new"),
+			wantErr:  `machine "m1" has a stale NodeRef for node "node1": references UID "uid-old", but the node's UID is "uid-new"`,
+		},
+		{
+			name:     "no machine references the node",
+			machines: []Machine{machine("m1", "other", ""), machine("m2", "", "")},
+			node:     node("node1", ""),
+			wantErr:  "matching machine not found",
+		},
+		{
+			name:     "no machines at all",
+			machines: nil,
+			node:     node("node1", ""),
+			wantErr:  "matching machine not found",
+		},
+		{
+			name:        "other machines bound to other nodes are ignored",
+			machines:    []Machine{machine("m1", "other", "uid-other"), machine("m2", "node1", "uid-1")},
+			node:        node("node1", "uid-1"),
+			wantMachine: "m2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FindUniqueMachineFromNodeRef(tt.machines, tt.node)
+
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if gotErr != tt.wantErr {
+				t.Fatalf("FindUniqueMachineFromNodeRef() error = %q, want %q", gotErr, tt.wantErr)
+			}
+
+			if tt.wantErr != "" {
+				if got != nil {
+					t.Fatalf("FindUniqueMachineFromNodeRef() returned machine %q alongside an error", got.Name)
+				}
+				return
+			}
+
+			if got == nil {
+				t.Fatalf("FindUniqueMachineFromNodeRef() = nil, want machine %q", tt.wantMachine)
+			}
+			if got.Name != tt.wantMachine {
+				t.Fatalf("FindUniqueMachineFromNodeRef() = %q, want %q", got.Name, tt.wantMachine)
 			}
 		})
 	}

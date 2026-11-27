@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
 	testingclock "k8s.io/utils/clock/testing"
@@ -38,6 +39,7 @@ import (
 
 // The following global test variables are populated within the init func
 var serverCertGood, serverKeyGood, rootCertGood string
+var pandaServerCertGood, pandaServerKeyGood string
 
 // Generated CRs, are populating within the init func
 var goodCSR, goodCSRECDSA, extraAddr, otherName, noNamePrefix, noGroup, clientGood, clientExtraO, clientWithDNS, clientWrongCN, clientEmptyName, emptyCSR, multusCSRPEM string
@@ -100,12 +102,20 @@ func init() {
 		panic(err)
 	}
 
+	// Serving cert for the "panda" node used by existing-node client CSR tests.
+	pandaServerCert, pandaServerKey, err := generateCertKeyPair(time.Hour, rootCert, rootKey, "system:node:panda", "panda")
+	if err != nil {
+		panic(err)
+	}
+
 	presetTimeCorrect = time.Now().UTC()
 	presetTimeExpired = time.Now().UTC().Add(-24 * time.Hour)
 
 	rootCertGood = string(rootCert)
 	serverCertGood = string(serverCert)
 	serverKeyGood = string(serverKey)
+	pandaServerCertGood = string(pandaServerCert)
+	pandaServerKeyGood = string(pandaServerKey)
 
 	defaultOrgs = []string{"system:nodes"}
 	defaultIPs = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("10.0.0.1")}
@@ -264,6 +274,71 @@ func Test_authorizeCSR(t *testing.T) {
 	withPort := func(port int32, node *corev1.Node) *corev1.Node {
 		node.Status.DaemonEndpoints.KubeletEndpoint.Port = port
 		return node
+	}
+	withReady := func(ready corev1.ConditionStatus, node *corev1.Node) *corev1.Node {
+		node.Status.Conditions = []corev1.NodeCondition{
+			{Type: corev1.NodeReady, Status: ready},
+		}
+		return node
+	}
+	// withConditions sets the node's conditions verbatim, so that a node with
+	// conditions but no Ready condition at all can be expressed.
+	withConditions := func(conditions []corev1.NodeCondition, node *corev1.Node) *corev1.Node {
+		node.Status.Conditions = conditions
+		return node
+	}
+	withUID := func(uid types.UID, node *corev1.Node) *corev1.Node {
+		node.UID = uid
+		return node
+	}
+
+	// makeBoundMachine builds a Machine bound to nodeName via NodeRef, with the
+	// given NodeRef UID (empty for controllers that do not record one) and
+	// addresses. Its creation timestamp is far enough in the past that the
+	// new-node join time window would reject it.
+	makeBoundMachine := func(machineName, nodeName string, nodeRefUID types.UID, addresses ...corev1.NodeAddress) machinehandlerpkg.Machine {
+		return machinehandlerpkg.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              machineName,
+				CreationTimestamp: creationTimestamp(-48 * time.Hour),
+			},
+			Status: machinehandlerpkg.MachineStatus{
+				NodeRef:   &corev1.ObjectReference{Name: nodeName, UID: nodeRefUID},
+				Addresses: addresses,
+			},
+		}
+	}
+
+	// bootstrapperClientReq builds a well-formed node-bootstrapper client CSR
+	// request, the shared shape of every existing-node re-bootstrap case below.
+	bootstrapperClientReq := func(name string) *certificatesv1.CertificateSigningRequest {
+		return &certificatesv1.CertificateSigningRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: certificatesv1.CertificateSigningRequestSpec{
+				Usages: []certificatesv1.KeyUsage{
+					certificatesv1.UsageKeyEncipherment,
+					certificatesv1.UsageDigitalSignature,
+					certificatesv1.UsageClientAuth,
+				},
+				Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+				Groups: []string{
+					"system:authenticated",
+					"system:serviceaccounts:openshift-machine-config-operator",
+					"system:serviceaccounts",
+				},
+			},
+		}
+	}
+	internalDNS := func(address string) corev1.NodeAddress {
+		return corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: address}
+	}
+
+	// pandaPort hosts a kubelet presenting system:node:panda for existing-node
+	// client CSR serving-cert proof. Distinct from defaultPort (system:node:test).
+	pandaPort := defaultPort + 17
+	rootCA := []*x509.Certificate{parseCert(t, rootCertGood)}
+	withPandaProof := func(node *corev1.Node) *corev1.Node {
+		return withPort(pandaPort, node)
 	}
 
 	var makeMachine = func(nodeName string, addresses ...corev1.NodeAddress) machinehandlerpkg.Machine {
@@ -1164,7 +1239,7 @@ func Test_authorizeCSR(t *testing.T) {
 			authorize: false,
 		},
 		{
-			name: "client good but node exists",
+			name: "client good but node exists without machine node ref",
 			args: args{
 				machines: []machinehandlerpkg.Machine{
 					makeMachine("", corev1.NodeAddress{corev1.NodeInternalDNS, "panda"}),
@@ -1188,6 +1263,355 @@ func Test_authorizeCSR(t *testing.T) {
 				csr: clientGood,
 			},
 			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// OCPBUGS-84535: after hibernate/resume >24h, kubelet re-bootstraps
+			// while Node and Machine already exist. Approve with Machine binding
+			// + serving-cert proof while the node is not Ready.
+			name: "client good existing node with matching machine node ref",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							// Machine created long ago; new-join time window would reject.
+							CreationTimestamp: creationTimestamp(-48 * time.Hour),
+						},
+						Status: machinehandlerpkg.MachineStatus{
+							NodeRef: &corev1.ObjectReference{Name: "panda"},
+							Addresses: []corev1.NodeAddress{
+								{Type: corev1.NodeInternalDNS, Address: "panda"},
+							},
+						},
+					},
+				},
+				node: withPandaProof(withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
+				req: &certificatesv1.CertificateSigningRequest{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "hibernate-resume",
+						CreationTimestamp: creationTimestamp(10 * time.Minute),
+					},
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			name: "client good existing node with matching machine node ref and upper case DNS",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "PANDA"}),
+				},
+				node: withPandaProof(withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			// A Ready node is not re-bootstrapping: a kubelet that has lost its
+			// client cert cannot renew its lease, so it leaves Ready within the
+			// node monitor grace period. Don't approve, but report the node as
+			// not yet settled so the controller takes another look rather than
+			// stranding a CSR that a real kubelet is blocked on.
+			name: "client good existing Ready node with matching machine node ref is deferred",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				node: withPandaProof(withReady(corev1.ConditionTrue, withName("panda", defaultNode()))),
+				ca:   rootCA,
+				req:  bootstrapperClientReq("ready-node"),
+				csr:  clientGood,
+			},
+			wantErr:   "node panda has not settled into a state where this CSR can be evaluated",
+			authorize: false,
+		},
+		{
+			// Readiness is checked last, so a request that could never be
+			// approved is rejected outright rather than deferred. Without this
+			// ordering every bootstrapper CSR naming any Ready node — including
+			// on UPI clusters, which have no Machines at all — would requeue
+			// repeatedly before giving up.
+			name: "client good existing Ready node with no machine binding is not deferred",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-other", "other", "", internalDNS("other")),
+				},
+				node: withReady(corev1.ConditionTrue, withName("panda", defaultNode())),
+				req:  bootstrapperClientReq("ready-node-no-machine"),
+				csr:  clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// Likewise, a Ready node whose machine binding is ambiguous is
+			// rejected rather than deferred.
+			name: "client good existing Ready node with ambiguous binding is not deferred",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda-a", "panda", "", internalDNS("panda")),
+					makeBoundMachine("machine-panda-b", "panda", "", internalDNS("panda")),
+				},
+				node: withReady(corev1.ConditionTrue, withName("panda", defaultNode())),
+				req:  bootstrapperClientReq("ready-node-ambiguous"),
+				csr:  clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// Ready=Unknown is what the node monitor records for an unreachable
+			// node, so it is the state a resumed node is actually found in.
+			name: "client good existing node with Ready=Unknown",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				node: withPandaProof(withReady(corev1.ConditionUnknown, withName("panda", defaultNode()))),
+				ca:   rootCA,
+				req:  bootstrapperClientReq("ready-unknown"),
+				csr:  clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			// A node that has not yet reported any Ready condition is likewise
+			// not Ready, and is treated the same as Ready=False.
+			name: "client good existing node with no Ready condition",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				node: withPandaProof(withConditions([]corev1.NodeCondition{
+					{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionFalse},
+				}, withName("panda", defaultNode()))),
+				ca:  rootCA,
+				req: bootstrapperClientReq("no-ready-condition"),
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			// The NodeRef names this node and carries its current UID: the
+			// binding is unambiguous and current, so it can be used as identity.
+			name: "client good existing node with machine node ref UID matching the node",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "panda-uid-1", internalDNS("panda")),
+				},
+				node: withPandaProof(withUID("panda-uid-1",
+					withReady(corev1.ConditionFalse, withName("panda", defaultNode())))),
+				ca:  rootCA,
+				req: bootstrapperClientReq("uid-match"),
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			// Name reuse: the NodeRef still points at a Node that was deleted and
+			// recreated under the same name. The binding proves nothing about the
+			// current node, so leave the CSR pending.
+			name: "client good existing node with stale machine node ref UID",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "panda-uid-old", internalDNS("panda")),
+				},
+				node: withUID("panda-uid-new",
+					withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				req: bootstrapperClientReq("stale-uid"),
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// Not every Machine controller records a UID in the NodeRef, so an
+			// empty NodeRef UID must not block approval.
+			name: "client good existing node with machine node ref lacking a UID",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				node: withPandaProof(withUID("panda-uid-1",
+					withReady(corev1.ConditionFalse, withName("panda", defaultNode())))),
+				ca:  rootCA,
+				req: bootstrapperClientReq("no-noderef-uid"),
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			// Two Machines claim the same Node. We cannot tell which binding is
+			// real, so neither counts as identity.
+			name: "client good existing node with ambiguous machine node ref binding",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda-a", "panda", "", internalDNS("panda")),
+					makeBoundMachine("machine-panda-b", "panda", "", internalDNS("panda")),
+				},
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				req:  bootstrapperClientReq("ambiguous-binding"),
+				csr:  clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// Machine status has no addresses yet. NodeRef alone carries the
+			// association, so the InternalDNS cross-check is skipped.
+			name: "client good existing node with machine node ref and no addresses",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", ""),
+				},
+				node: withPandaProof(withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
+				req:  bootstrapperClientReq("no-addresses"),
+				csr:  clientGood,
+			},
+			wantErr:   "",
+			authorize: true,
+		},
+		{
+			// Addresses are populated but none is an InternalDNS, so the
+			// cross-check cannot pass. Same invariant as the new-node join path,
+			// which also requires an InternalDNS address.
+			name: "client good existing node with addresses but no InternalDNS",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "",
+						corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "127.0.0.1"}),
+				},
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				req:  bootstrapperClientReq("no-internal-dns"),
+				csr:  clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			name: "client good existing node with node ref but mismatched InternalDNS",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("panda", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "not-panda"}),
+				},
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			name: "client good existing node with wrong machine node ref",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeMachine("other", corev1.NodeAddress{Type: corev1.NodeInternalDNS, Address: "panda"}),
+				},
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				req: &certificatesv1.CertificateSigningRequest{
+					Spec: certificatesv1.CertificateSigningRequestSpec{
+						Usages: []certificatesv1.KeyUsage{
+							certificatesv1.UsageKeyEncipherment,
+							certificatesv1.UsageDigitalSignature,
+							certificatesv1.UsageClientAuth,
+						},
+						Username: "system:serviceaccount:openshift-machine-config-operator:node-bootstrapper",
+						Groups: []string{
+							"system:authenticated",
+							"system:serviceaccounts:openshift-machine-config-operator",
+							"system:serviceaccounts",
+						},
+					},
+				},
+				csr: clientGood,
+			},
+			wantErr:   "",
+			authorize: false,
+		},
+		{
+			// Serving cert is unreachable: defer and retry rather than approve
+			// without node-specific proof.
+			name: "client good existing node without serving-cert proof is deferred",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				// defaultPort has no listener for this case: shared test server
+				// is for system:node:test, and we point at an unused port.
+				node: withPort(defaultPort+99, withReady(corev1.ConditionFalse, withName("panda", defaultNode()))),
+				ca:   rootCA,
+				req:  bootstrapperClientReq("missing-proof"),
+				csr:  clientGood,
+			},
+			wantErr:   "node panda has not settled into a state where this CSR can be evaluated",
+			authorize: false,
+		},
+		{
+			// Kubelet presents a serving cert for a different node name: reject.
+			name: "client good existing node with wrong serving-cert identity is rejected",
+			args: args{
+				machines: []machinehandlerpkg.Machine{
+					makeBoundMachine("machine-panda", "panda", "", internalDNS("panda")),
+				},
+				// defaultPort serves system:node:test, not panda.
+				node: withReady(corev1.ConditionFalse, withName("panda", defaultNode())),
+				ca:   rootCA,
+				req:  bootstrapperClientReq("wrong-serving-cn"),
+				csr:  clientGood,
+			},
+			wantErr:   "node serving certificate common name \"system:node:test\" does not match requested node identity \"system:node:panda\"",
 			authorize: false,
 		},
 		{
@@ -1733,6 +2157,10 @@ func Test_authorizeCSR(t *testing.T) {
 	server := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, defaultPort), serverCertGood, serverKeyGood)
 	go respond(t.Context(), server)
 	defer server.Close()
+
+	pandaServer := fakeResponder(t, fmt.Sprintf("%s:%v", defaultAddr, pandaPort), pandaServerCertGood, pandaServerKeyGood)
+	go respond(t.Context(), pandaServer)
+	defer pandaServer.Close()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	machinehandlerpkg "github.com/openshift/cluster-machine-approver/pkg/machinehandler"
 	certificatesv1 "k8s.io/api/certificates/v1"
@@ -33,6 +34,19 @@ const (
 	configNamespace            = "openshift-config-managed"
 	kubeletCAConfigMap         = "csr-controller-ca"
 	csrConditionApproveMessage = "This CSR was approved by the Node CSR Approver (cluster-machine-approver)"
+
+	// nodeSettleRetryInterval is how long to wait before re-evaluating a CSR
+	// whose Node has not yet settled into a state we can judge. A node whose
+	// kubelet has lost its client certificate stops renewing its lease and
+	// leaves Ready within the node monitor grace period (40s by default), so
+	// this is short enough to catch that transition promptly.
+	nodeSettleRetryInterval = 15 * time.Second
+
+	// nodeSettleRetryWindow bounds how long we keep re-evaluating such a CSR,
+	// measured from the CSR's creation. Well past the grace period above: if the
+	// node is still Ready by then, the request is not the re-bootstrap case and
+	// another look will not change that.
+	nodeSettleRetryWindow = 10 * time.Minute
 )
 
 // MachineApproverReconciler reconciles a machine-approver  object
@@ -202,7 +216,8 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	for _, csr := range csrs {
 		if csr.Name == req.Name {
-			if err := m.reconcileCSR(ctx, csr, machines); err != nil {
+			result, err := m.reconcileCSR(ctx, csr, machines)
+			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("could not reconcile CSR: %v", err)
 			}
 
@@ -211,7 +226,14 @@ func (m *CertificateApprover) Reconcile(ctx context.Context, req ctrl.Request) (
 			// When an error occurs, we requeue and so update the limits on the
 			// next reconcile.
 			// Don't use a cached client here else we may not have up to date CSRs.
-			return reconcile.Result{}, reconcileLimitsUncached(m.NodeRestCfg, csr.Name, machines, nodes)
+			if err := reconcileLimitsUncached(m.NodeRestCfg, csr.Name, machines, nodes); err != nil {
+				// Returning an error alongside a RequeueAfter would discard the
+				// RequeueAfter, so return the error alone and let the resulting
+				// requeue re-evaluate the CSR.
+				return reconcile.Result{}, err
+			}
+
+			return result, nil
 		}
 	}
 
@@ -259,20 +281,20 @@ func reconcileLimitsUncached(cfg *rest.Config, csrName string, machines []machin
 	return nil
 }
 
-func (m *CertificateApprover) reconcileCSR(ctx context.Context, csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) error {
+func (m *CertificateApprover) reconcileCSR(ctx context.Context, csr certificatesv1.CertificateSigningRequest, machines []machinehandlerpkg.Machine) (reconcile.Result, error) {
 	// If a CSR is approved after being added to the queue, but before we reconcile it,
 	// it may have already been approved. If it has already been approved, trying to
 	// approve it again will result in an error and cause a loop.
 	// Return early if the CSR has been approved externally.
 	if isApproved(csr) {
 		klog.Infof("%v: CSR is already approved", csr.Name)
-		return nil
+		return reconcile.Result{}, nil
 	}
 
 	parsedCSR, err := parseCSR(&csr)
 	if err != nil {
 		klog.Errorf("%v: Failed to parse csr: %v", csr.Name, err)
-		return fmt.Errorf("error parsing request CSR: %v", err)
+		return reconcile.Result{}, fmt.Errorf("error parsing request CSR: %v", err)
 	}
 
 	if authorize, err := authorizeCSR(ctx, m.WorkloadClient, m.Config, machines, &csr, parsedCSR); !authorize {
@@ -281,25 +303,42 @@ func (m *CertificateApprover) reconcileCSR(ctx context.Context, csr certificates
 			if errors.As(err, &validationErr) {
 				// Validation failure — CSR is invalid, log and don't retry
 				klog.Infof("%s: CSR not authorized: %v", csr.Name, err)
-				return nil
+				return reconcile.Result{}, nil
 			}
+
+			var notSettledErr *nodeNotSettledError
+			if errors.As(err, &notSettledErr) {
+				// The node's observed state may still catch up. Nothing else will
+				// bring this CSR back — the controller does not watch Nodes, by
+				// design, to avoid caching them — so schedule another look
+				// ourselves. Bound the retries by the CSR's age so that a request
+				// that will never be approvable stops requeueing.
+				if age := time.Since(csr.CreationTimestamp.Time); age >= nodeSettleRetryWindow {
+					klog.Infof("%s: CSR not authorized after %s: %v", csr.Name, nodeSettleRetryWindow, err)
+					return reconcile.Result{}, nil
+				}
+
+				klog.Infof("%s: %v, will re-evaluate in %s", csr.Name, err, nodeSettleRetryInterval)
+				return reconcile.Result{RequeueAfter: nodeSettleRetryInterval}, nil
+			}
+
 			// Infrastructure error — retry
 			klog.Errorf("%s: error authorizing CSR: %v", csr.Name, err)
-			return err
+			return reconcile.Result{}, err
 		}
 
 		// No error, just not auto-approvable (e.g. not a node cert we handle)
 		// Don't deny since it might be someone else's CSR
 		klog.Infof("%s: CSR not authorized", csr.Name)
-		return nil
+		return reconcile.Result{}, nil
 	}
 
 	if err := approve(m.NodeRestCfg, &csr); err != nil {
-		return fmt.Errorf("Unable to approve CSR %s: %w", csr.Name, err)
+		return reconcile.Result{}, fmt.Errorf("Unable to approve CSR %s: %w", csr.Name, err)
 	}
 	klog.Infof("CSR %s approved", csr.Name)
 
-	return nil
+	return reconcile.Result{}, nil
 }
 
 func approve(rest *rest.Config, csr *certificatesv1.CertificateSigningRequest) error {
